@@ -37,13 +37,15 @@ class Var:
             v = float(v)
         except Exception:
             return False
-        # Normalize angles (uppercase names A, B, C, D) to [0, 360) range
-        if self.name in ('A', 'B', 'C', 'D'):
-            # Normalize to [0, 360) using modulo
-            v = v % 360.0
-            # Ensure positive (handle negative angles)
-            if v < 0:
-                v += 360.0
+        # Validation trước khi normalize
+        if self.name in ('A', 'B', 'C'):  # Triangle angles
+            if v <= 0 or v >= 180:
+                raise ValueError(f"Triangle angle {self.name} must be in (0, 180)")
+            # Không cần chuẩn hóa góc tam giác
+        elif self.name == 'D':  # Quadrilateral angle
+            if v <= 0 or v >= 360:
+                raise ValueError(f"Quadrilateral angle {self.name} must be in (0, 360)")
+            v = v % 360.0  # Chỉ chuẩn hóa góc tứ giác
         if self.value is None or abs(self.value - v) > EPSILON:
             self.value = v
             self.source = source

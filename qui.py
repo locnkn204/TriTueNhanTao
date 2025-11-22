@@ -22,6 +22,13 @@ class GeometryCalculatorGUI:
         
         # Shape selection
         self.shape_var = tk.StringVar(value="auto")  # "auto", "triangle", "rectangle"
+
+        # Lưu network sau khi tính toán
+        self.last_network = None
+        # Lưu loại hình sau khi tính toán
+        self.last_is_triangle = None
+        # Lưu kết quả sau khi tính toán
+        self.last_result = None
         
         self.create_widgets()
         
@@ -47,24 +54,28 @@ class GeometryCalculatorGUI:
         
         # Triangle options
         ttk.Label(shape_frame, text="Tam giác:", font=('Arial', 9, 'bold')).grid(row=1, column=0, sticky=tk.W, padx=5, pady=(5,2))
-        ttk.Radiobutton(shape_frame, text="Tam giác thường", variable=self.shape_var, 
-                       value="triangle").grid(row=1, column=1, sticky=tk.W, padx=5)
-        ttk.Radiobutton(shape_frame, text="Tam giác vuông", variable=self.shape_var, 
-                       value="triangle_right").grid(row=1, column=2, sticky=tk.W, padx=5)
-        
+        ttk.Radiobutton(shape_frame, text="Tam giác thường", variable=self.shape_var, value="triangle").grid(row=1, column=1, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Tam giác vuông", variable=self.shape_var, value="triangle_right").grid(row=1, column=2, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Tam giác đều", variable=self.shape_var, value="triangle_equilateral").grid(row=1, column=3, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Tam giác cân", variable=self.shape_var, value="triangle_isosceles").grid(row=1, column=4, sticky=tk.W, padx=5)
+
         # Quadrilateral options
         ttk.Label(shape_frame, text="Tứ giác:", font=('Arial', 9, 'bold')).grid(row=2, column=0, sticky=tk.W, padx=5, pady=(5,2))
-        ttk.Radiobutton(shape_frame, text="Hình vuông", variable=self.shape_var, 
-                       value="square").grid(row=2, column=1, sticky=tk.W, padx=5)
-        ttk.Radiobutton(shape_frame, text="Hình chữ nhật", variable=self.shape_var, 
-                       value="rectangle").grid(row=2, column=2, sticky=tk.W, padx=5)
-        ttk.Radiobutton(shape_frame, text="Tứ giác thường", variable=self.shape_var, 
-                       value="quadrilateral").grid(row=2, column=3, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Hình vuông", variable=self.shape_var, value="square").grid(row=2, column=1, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Hình chữ nhật", variable=self.shape_var, value="rectangle").grid(row=2, column=2, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Hình thoi", variable=self.shape_var, value="rhombus").grid(row=2, column=3, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Hình bình hành", variable=self.shape_var, value="parallelogram").grid(row=2, column=4, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Hình thang", variable=self.shape_var, value="trapezoid").grid(row=2, column=5, sticky=tk.W, padx=5)
+        ttk.Radiobutton(shape_frame, text="Tứ giác thường", variable=self.shape_var, value="quadrilateral").grid(row=2, column=6, sticky=tk.W, padx=5)
         
+        # --- THÊM NÚT HIỂN THỊ NÂNG CAO ---
+        self.advanced_var = tk.BooleanVar(value=False)
+        advanced_btn = ttk.Checkbutton(left_frame, text="Hiển thị nâng cao (nhập riêng từng chiều cao h_a, h_b, h_c, h_d)", variable=self.advanced_var, command=self.toggle_advanced)
+        advanced_btn.grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+
         # Input fields - Sides
         sides_frame = ttk.LabelFrame(left_frame, text="Cạnh (Sides)", padding="5")
         sides_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        
         self.input_vars['a'] = tk.StringVar()
         self.input_vars['b'] = tk.StringVar()
         self.input_vars['c'] = tk.StringVar()
@@ -82,6 +93,30 @@ class GeometryCalculatorGUI:
         ttk.Label(sides_frame, text="d:").grid(row=1, column=2, sticky=tk.W, padx=5, pady=2)
         ttk.Entry(sides_frame, textvariable=self.input_vars['d'], width=15).grid(row=1, column=3, padx=5, pady=2)
         
+        # --- THÊM INPUT CHIỀU CAO ---
+        self.input_vars['h'] = tk.StringVar()
+        ttk.Label(sides_frame, text="h (chiều cao, ứng với cạnh a):").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(sides_frame, textvariable=self.input_vars['h'], width=15).grid(row=2, column=1, padx=5, pady=2)
+
+        # --- INPUT CHIỀU CAO NÂNG CAO ---
+        self.input_vars['h_a'] = tk.StringVar()
+        self.input_vars['h_b'] = tk.StringVar()
+        self.input_vars['h_c'] = tk.StringVar()
+        self.input_vars['h_d'] = tk.StringVar()
+        self.hb_label = ttk.Label(sides_frame, text="h_b (chiều cao ứng với cạnh b):")
+        self.hb_entry = ttk.Entry(sides_frame, textvariable=self.input_vars['h_b'], width=15)
+        self.hc_label = ttk.Label(sides_frame, text="h_c (chiều cao ứng với cạnh c):")
+        self.hc_entry = ttk.Entry(sides_frame, textvariable=self.input_vars['h_c'], width=15)
+        self.hd_label = ttk.Label(sides_frame, text="h_d (chiều cao ứng với cạnh d):")
+        self.hd_entry = ttk.Entry(sides_frame, textvariable=self.input_vars['h_d'], width=15)
+        # Ẩn mặc định
+        self.hb_label.grid_remove()
+        self.hb_entry.grid_remove()
+        self.hc_label.grid_remove()
+        self.hc_entry.grid_remove()
+        self.hd_label.grid_remove()
+        self.hd_entry.grid_remove()
+
         # Input fields - Angles
         angles_frame = ttk.LabelFrame(left_frame, text="Góc (Angles) - độ", padding="5")
         angles_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
@@ -158,7 +193,29 @@ class GeometryCalculatorGUI:
         self.ax.text(0.5, 0.5, 'Nhập dữ liệu và nhấn "Tính toán"\nđể xem đồ thị', 
                     ha='center', va='center', fontsize=12, transform=self.ax.transAxes)
         self.canvas.draw()
-        
+        self.last_network = None
+        self.last_is_triangle = None
+        self.last_result = None
+
+    def toggle_advanced(self):
+        """Hiện/ẩn các trường nhập chiều cao nâng cao"""
+        if self.advanced_var.get():
+            # Hiện các trường nhập h_b, h_c, h_d
+            self.hb_label.grid(row=2, column=2, sticky=tk.W, padx=5, pady=2)
+            self.hb_entry.grid(row=2, column=3, padx=5, pady=2)
+            self.hc_label.grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
+            self.hc_entry.grid(row=3, column=1, padx=5, pady=2)
+            self.hd_label.grid(row=3, column=2, sticky=tk.W, padx=5, pady=2)
+            self.hd_entry.grid(row=3, column=3, padx=5, pady=2)
+        else:
+            # Ẩn các trường nhập h_b, h_c, h_d
+            self.hb_label.grid_remove()
+            self.hb_entry.grid_remove()
+            self.hc_label.grid_remove()
+            self.hc_entry.grid_remove()
+            self.hd_label.grid_remove()
+            self.hd_entry.grid_remove()
+
     def parse_inputs(self) -> Dict[str, float]:
         """Parse input values from GUI, return dict of name->value (None if empty)"""
         inputs = {}
@@ -170,6 +227,14 @@ class GeometryCalculatorGUI:
                     inputs[name] = val
                 except ValueError:
                     pass  # Invalid number, skip
+        # Nếu nâng cao, ưu tiên các giá trị h_a, h_b, h_c, h_d nếu có
+        if self.advanced_var.get():
+            for hname in ['h_a', 'h_b', 'h_c', 'h_d']:
+                if hname in inputs:
+                    inputs[hname] = inputs[hname]
+        # Nếu chỉ nhập h, gán cho h_a
+        if 'h' in inputs and 'h_a' not in inputs:
+            inputs['h_a'] = inputs['h']
         return inputs
     
     def validate_inputs(self, inputs: Dict[str, float]) -> Tuple[bool, str]:
@@ -186,84 +251,114 @@ class GeometryCalculatorGUI:
                 if val <= 0 or val >= 360:
                     return False, f"Góc {angle} phải trong khoảng (0, 360)"
         
+        # Kiểm tra chiều cao > 0 nếu có
+        if 'h' in inputs and inputs['h'] <= 0:
+            return False, "Chiều cao (h) phải > 0"
         return True, ""
     
+    def score_network(self, net: ConstraintNetwork, other: ConstraintNetwork) -> int:
+        """Scoring function to help auto-detect best network"""
+        known = sum(1 for v in net.vars.values() if v.is_known())
+        unique_known = sum(1 for n, v in net.vars.items() if n not in other.vars and v.is_known())
+        return known + unique_known * 2
+
     def choose_network(self, inputs: Dict[str, float]) -> Tuple[Optional[ConstraintNetwork], str]:
         """Choose which network to use based on shape selection or auto-detect"""
         shape = self.shape_var.get()
         
-        if shape == "triangle" or shape == "triangle_right":
-            msg = "Tam giác vuông (đã chọn)" if shape == "triangle_right" else "Tam giác (đã chọn)"
+        # --- LOGIC CHỌN THỦ CÔNG (MANUAL) ---
+        if shape == "triangle":
+            return kb.create_triangle_network(), "Tam giác thường (đã chọn)"
+        elif shape == "triangle_right":
             net = kb.create_triangle_network()
-            # If triangle_right, set one angle to 90 if not provided
-            if shape == "triangle_right" and 'A' not in inputs and 'B' not in inputs and 'C' not in inputs:
-                # Will be handled by constraints, but we can hint
-                pass
-            return net, msg
+            has_right_angle = any(abs(inputs.get(ang, 0) - 90) < 0.1 for ang in ['A','B','C'])
+            if not has_right_angle:
+                inputs['C'] = 90.0
+            return net, "Tam giác vuông (đã chọn)"
+        elif shape == "triangle_equilateral":
+            net = kb.create_triangle_network()
+            val_a = inputs.get('a') or inputs.get('b') or inputs.get('c') or inputs.get('d')
+            if val_a is not None:
+                inputs.update({'a': val_a, 'b': val_a, 'c': val_a})
+            inputs.update({'A': 60.0, 'B': 60.0, 'C': 60.0})
+            return net, "Tam giác đều (đã chọn, auto-fill)"
+        elif shape == "triangle_isosceles":
+            net = kb.create_triangle_network()
+            a, b, c = inputs.get('a'), inputs.get('b'), inputs.get('c')
+            if a and b and abs(a-b) < 1e-6:
+                inputs.setdefault('A', 70.0); inputs.setdefault('B', 70.0)
+            elif b and c and abs(b-c) < 1e-6:
+                inputs.setdefault('B', 70.0); inputs.setdefault('C', 70.0)
+            elif a and c and abs(a-c) < 1e-6:
+                inputs.setdefault('A', 70.0); inputs.setdefault('C', 70.0)
+            return net, "Tam giác cân (đã chọn)"
         elif shape == "square":
-            net = kb.create_rectangle_network()
-            # For square, we can set constraints: a=b=c=d, A=B=C=D=90
-            # But let the solver handle it based on inputs
-            return net, "Hình vuông (đã chọn)"
+            net = kb.create_square_network()
+            val = inputs.get('a') or inputs.get('b') or inputs.get('c') or inputs.get('d')
+            if val is not None:
+                inputs.update({'a': val, 'b': val, 'c': val, 'd': val})
+            inputs.update({'A': 90.0, 'B': 90.0, 'C': 90.0, 'D': 90.0})
+            return net, "Hình vuông (đã chọn, auto-fill)"
         elif shape == "rectangle":
-            return kb.create_rectangle_network(), "Hình chữ nhật (đã chọn)"
+            net = kb.create_rectangle_network()
+            val_ac = inputs.get('a') if inputs.get('a') is not None else inputs.get('c')
+            if val_ac is not None: inputs.update({'a': val_ac, 'c': val_ac})
+            val_bd = inputs.get('b') if inputs.get('b') is not None else inputs.get('d')
+            if val_bd is not None: inputs.update({'b': val_bd, 'd': val_bd})
+            inputs.update({'A': 90.0, 'B': 90.0, 'C': 90.0, 'D': 90.0})
+            msg = "Hình chữ nhật (đã chọn)"
+            if val_ac and inputs.get('c') and abs(val_ac - inputs['c']) > 1e-6:
+                 msg += " (Đã đồng bộ cạnh)"
+            return net, msg
+        elif shape == "rhombus":
+            net = kb.create_rhombus_network()
+            val = inputs.get('a')
+            if val is not None:
+                inputs.update({'a': val, 'b': val, 'c': val, 'd': val})
+            return net, "Hình thoi (đã chọn)"
+        elif shape == "parallelogram":
+            net = kb.create_parallelogram_network()
+            if inputs.get('a'): inputs['c'] = inputs['a']
+            if inputs.get('b'): inputs['d'] = inputs['b']
+            if inputs.get('A'): inputs['C'] = inputs['A']
+            if inputs.get('B'): inputs['D'] = inputs['B']
+            return net, "Hình bình hành (đã chọn)"
+        elif shape == "trapezoid":
+            net = kb.create_trapezoid_network()
+            return net, "Hình thang (đã chọn)"
         elif shape == "quadrilateral":
-            return kb.create_rectangle_network(), "Tứ giác (đã chọn)"
+            net = kb.create_quadrilateral_network()
+            return net, "Tứ giác thường (đã chọn)"
         
-        # Auto-detect
+        # --- LOGIC TỰ ĐỘNG (AUTO-DETECT) ---
         tri_side_names = {'a', 'b', 'c'}
         rect_side_names = {'a', 'b', 'c', 'd'}
-        tri_angle_names = {'A', 'B', 'C'}
-        rect_angle_names = {'A', 'B', 'C', 'D'}
-        
-        tri_side_count = sum(1 for n in inputs if n in tri_side_names)
-        rect_side_count = sum(1 for n in inputs if n in rect_side_names)
-        tri_angle_count = sum(1 for n in inputs if n in tri_angle_names)
-        rect_angle_count = sum(1 for n in inputs if n in rect_angle_names)
         has_d = ('d' in inputs) or ('D' in inputs)
         
-        if has_d:
-            return kb.create_rectangle_network(), "Tứ giác (có cạnh/góc d)"
+        if has_d: return kb.create_rectangle_network(), "Tứ giác (có d)"
         
-        # If 3 sides or 3 angles -> triangle
-        if tri_side_count >= 3 or tri_angle_count >= 3:
-            a = inputs.get('a')
-            b = inputs.get('b')
-            c = inputs.get('c')
-            if a is not None and b is not None and c is not None:
-                if not ((a + b > c) and (a + c > b) and (b + c > a)):
-                    return kb.create_triangle_network(), "Tam giác (cảnh báo: có thể vi phạm bất đẳng thức tam giác)"
-            return kb.create_triangle_network(), "Tam giác (tự động)"
+        tri_count = sum(1 for n in inputs if n in tri_side_names) + sum(1 for n in inputs if n in ['A','B','C'])
+        rect_count = sum(1 for n in inputs if n in rect_side_names) + sum(1 for n in inputs if n in ['A','B','C','D'])
+
+        if sum(1 for n in inputs if n in tri_side_names) >= 3:
+             return kb.create_triangle_network(), "Tam giác (3 cạnh)"
         
-        # If 4 sides or 4 angles -> quadrilateral
-        if rect_side_count >= 4 or rect_angle_count >= 4:
-            return kb.create_rectangle_network(), "Tứ giác (tự động)"
-        
-        # Check for right angle + adjacent sides -> rectangle
-        right_angles = [name for name, val in inputs.items()
-                       if name in rect_angle_names and abs(val - 90.0) <= 0.1]
-        if right_angles:
-            assigned_sides = set(n for n in inputs if n in rect_side_names)
-            adjacent_pairs = [('a', 'b'), ('b', 'c'), ('c', 'd'), ('d', 'a')]
-            has_adjacent = any(p[0] in assigned_sides and p[1] in assigned_sides for p in adjacent_pairs)
-            if has_adjacent and tri_side_count < 3:
-                return kb.create_rectangle_network(), "Tứ giác (góc vuông + cạnh kề)"
-            if len(assigned_sides) >= 2 and tri_side_count < 3:
-                return kb.create_rectangle_network(), "Tứ giác (góc vuông, ưu tiên tránh gán tam giác)"
-        
-        if rect_side_count >= 2 and rect_angle_count >= 2:
-            return kb.create_rectangle_network(), "Tứ giác (dữ liệu hỗn hợp)"
-        if rect_side_count >= 2 and tri_side_count == 0:
-            return kb.create_rectangle_network(), "Tứ giác (ưu tiên)"
-        
-        # Default: prefer triangle if has any triangle data
-        if tri_side_count > 0 or tri_angle_count > 0:
-            return kb.create_triangle_network(), "Tam giác (mặc định)"
-        elif rect_side_count > 0 or rect_angle_count > 0:
-            return kb.create_rectangle_network(), "Tứ giác (mặc định)"
-        
-        return None, "Không đủ dữ liệu"
-    
+        # --- FALLBACK: CHẤM ĐIỂM (SCORING) ---
+        tri_net = kb.create_triangle_network()
+        rect_net = kb.create_rectangle_network()
+        tri_net.reset(); rect_net.reset()
+        for k, v in inputs.items():
+            if k in tri_net.vars: tri_net.set_input(k, v, 'temp')
+            if k in rect_net.vars: rect_net.set_input(k, v, 'temp')
+        tscore = self.score_network(tri_net, rect_net)
+        rscore = self.score_network(rect_net, tri_net)
+        if tscore == 0 and rscore == 0:
+            return None, "Không đủ dữ liệu"
+        if tscore >= rscore:
+            return kb.create_triangle_network(), f"Tam giác (Score: {tscore})"
+        else:
+            return kb.create_rectangle_network(), f"Tứ giác (Score: {rscore})"
+
     def classify_shape(self, net: ConstraintNetwork, res: Dict[str, Optional[float]], is_triangle: bool) -> Tuple[str, list]:
         """Classify the shape type"""
         if is_triangle:
@@ -404,35 +499,72 @@ class GeometryCalculatorGUI:
         self.ax.set_aspect('equal')
         self.ax.axis('off')
         
-        # Ưu tiên vẽ hình bình hành khi biết góc khác 90°, sau đó tới chữ nhật
-        if a is not None and b is not None and A is not None and abs(A - 90) > 0.1:
-            # Parallelogram with angle A
+        # Xác định loại hình để vẽ đúng đặc trưng
+        shape = self.shape_var.get()
+        # Hình chữ nhật: a==c, b==d, góc 90
+        if shape == "rectangle" and a is not None and b is not None and c is not None and d is not None and \
+            abs(a-c)<1e-6 and abs(b-d)<1e-6 and all(x is not None and abs(x-90)<0.1 for x in (A,B,C,D)):
+            A_coord = (0, 0)
+            B_coord = (a, 0)
+            C_coord = (a, b)
+            D_coord = (0, b)
+        # Hình vuông: a==b==c==d, góc 90
+        elif shape == "square" and a is not None and b is not None and c is not None and d is not None and \
+            abs(a-b)<1e-6 and abs(a-c)<1e-6 and abs(a-d)<1e-6 and all(x is not None and abs(x-90)<0.1 for x in (A,B,C,D)):
+            A_coord = (0, 0)
+            B_coord = (a, 0)
+            C_coord = (a, a)
+            D_coord = (0, a)
+        # Hình bình hành: a==c, b==d, góc đối bằng nhau
+        elif shape == "parallelogram" and a is not None and b is not None and c is not None and d is not None and \
+            abs(a-c)<1e-6 and abs(b-d)<1e-6 and A is not None and C is not None and abs(A-C)<1e-6:
             angle_A_rad = math.radians(A)
             A_coord = (0, 0)
             B_coord = (a, 0)
             D_coord = (b * math.cos(angle_A_rad), b * math.sin(angle_A_rad))
             C_coord = (B_coord[0] + D_coord[0], B_coord[1] + D_coord[1])
-        elif a is not None and b is not None:
-            # Rectangle case - use a and b as adjacent sides
+        # Hình thang: a, c là đáy, b, d là cạnh bên, biết chiều cao h
+        elif shape == "trapezoid" and a is not None and c is not None and b is not None and d is not None:
+            # Giả sử đáy a nằm dưới, đáy c nằm trên, b và d là cạnh bên, vẽ hình thang cân nếu có
+            h = None
+            if abs(b-d)<1e-6:
+                # Hình thang cân
+                h = math.sqrt(b**2 - ((c-a)/2)**2) if b > abs(c-a)/2 else b
+                A_coord = (0, 0)
+                B_coord = (a, 0)
+                D_coord = ((a-c)/2, h)
+                C_coord = (D_coord[0]+c, h)
+            else:
+                # Hình thang thường: vẽ đơn giản
+                h = min(b, d)
+                A_coord = (0, 0)
+                B_coord = (a, 0)
+                D_coord = (0, h)
+                C_coord = (c, h)
+        # Hình thoi: a==b==c==d, góc không nhất thiết 90
+        elif shape == "rhombus" and a is not None and b is not None and c is not None and d is not None and \
+            abs(a-b)<1e-6 and abs(a-c)<1e-6 and abs(a-d)<1e-6:
+            # Dùng góc A nếu có
+            angle_A_rad = math.radians(A) if A is not None else math.pi/3
+            A_coord = (0, 0)
+            B_coord = (a, 0)
+            D_coord = (a * math.cos(angle_A_rad), a * math.sin(angle_A_rad))
+            C_coord = (B_coord[0] + D_coord[0], B_coord[1] + D_coord[1])
+        # Tứ giác thường: vẽ theo dữ liệu cạnh (ưu tiên a,b,c,d)
+        elif a is not None and b is not None and c is not None and d is not None:
+            # Vẽ tứ giác lồi đơn giản: A(0,0), B(a,0), C(a,b), D(0,d)
             A_coord = (0, 0)
             B_coord = (a, 0)
             C_coord = (a, b)
-            D_coord = (0, b)
-        elif a is not None and c is not None and b is not None:
-            # Parallelogram: a opposite c, b opposite d, assume 90 degrees
-            A_coord = (0, 0)
-            B_coord = (a, 0)
-            D_coord = (0, b)
-            C_coord = (a, b)
+            D_coord = (0, d)
         else:
-            self.ax.text(0.5, 0.5, 'Không đủ dữ liệu để vẽ tứ giác\n(Cần ít nhất 2 cạnh kề nhau)', 
+            self.ax.text(0.5, 0.5, 'Không đủ dữ liệu để vẽ tứ giác\n(Cần đủ 4 cạnh)', 
                         ha='center', va='center', fontsize=12, transform=self.ax.transAxes)
             return
-        
-        # Draw quadrilateral
+
+        # Vẽ tứ giác
         quad = plt.Polygon([A_coord, B_coord, C_coord, D_coord], fill=False, edgecolor='blue', linewidth=2)
         self.ax.add_patch(quad)
-        
         # Label vertices
         for coord, label in [(A_coord, 'A'), (B_coord, 'B'), (C_coord, 'C'), (D_coord, 'D')]:
             self.ax.plot(*coord, 'ro', markersize=8)
@@ -440,7 +572,6 @@ class GeometryCalculatorGUI:
             offset_y = -0.1 if coord[1] < 0.1 else 0.1
             self.ax.text(coord[0] + offset_x, coord[1] + offset_y, label, 
                         ha='center', va='center', fontsize=12, fontweight='bold')
-        
         # Label sides if available
         if a is not None:
             mid_ab = ((A_coord[0] + B_coord[0])/2, (A_coord[1] + B_coord[1])/2)
@@ -448,7 +579,12 @@ class GeometryCalculatorGUI:
         if b is not None:
             mid_ad = ((A_coord[0] + D_coord[0])/2, (A_coord[1] + D_coord[1])/2)
             self.ax.text(mid_ad[0] - 0.1, mid_ad[1], f'b={b:.2f}', ha='right', va='center', fontsize=10)
-        
+        if c is not None:
+            mid_bc = ((B_coord[0] + C_coord[0])/2, (B_coord[1] + C_coord[1])/2)
+            self.ax.text(mid_bc[0], mid_bc[1] + 0.1, f'c={c:.2f}', ha='center', va='bottom', fontsize=10)
+        if d is not None:
+            mid_cd = ((C_coord[0] + D_coord[0])/2, (C_coord[1] + D_coord[1])/2)
+            self.ax.text(mid_cd[0] + 0.1, mid_cd[1], f'd={d:.2f}', ha='left', va='center', fontsize=10)
         # Set limits
         all_x = [A_coord[0], B_coord[0], C_coord[0], D_coord[0]]
         all_y = [A_coord[1], B_coord[1], C_coord[1], D_coord[1]]
@@ -558,18 +694,21 @@ class GeometryCalculatorGUI:
             messagebox.showwarning("Cảnh báo", "Vui lòng nhập ít nhất một giá trị!")
             return
         
-        # Validate perimeter and area if provided
+        # Validate perimeter, area, height
         if 'perimeter' in inputs and inputs['perimeter'] <= 0:
             messagebox.showerror("Lỗi", "Chu vi phải > 0")
             return
         if 'area' in inputs and inputs['area'] <= 0:
             messagebox.showerror("Lỗi", "Diện tích phải > 0")
             return
+        if 'h' in inputs and inputs['h'] <= 0:
+            messagebox.showerror("Lỗi", "Chiều cao (h) phải > 0")
+            return
         
         # Validate inputs
         valid, msg = self.validate_inputs(inputs)
         if not valid:
-            messagebox.showerror("Lỗi", msg)
+            messagebox.showerror("Lỗi cạnh và góc nằm ngoài giá trị cho phép", msg)
             return
         
         # Choose network
@@ -577,167 +716,63 @@ class GeometryCalculatorGUI:
         if net is None:
             messagebox.showerror("Lỗi", kind_msg)
             return
-        
-        # Determine if triangle
+
         shape_sel = self.shape_var.get()
-        is_triangle = (shape_sel in ("triangle", "triangle_right") or 
-                      (shape_sel == "auto" and kind_msg.startswith("Tam giác")))
-        
-        # Early triangle inequality check
-        if is_triangle:
-            a = inputs.get('a')
-            b = inputs.get('b')
-            c = inputs.get('c')
-            if a is not None and b is not None and c is not None:
-                if not ((a + b > c) and (a + c > b) and (b + c > a)):
-                    self.results_text.insert(tk.END, 
-                        f"⚠ CẢNH BÁO: Bất đẳng thức tam giác có thể bị vi phạm!\n"
-                        f"  a={a}, b={b}, c={c}\n"
-                        f"  (a+b > c, a+c > b, b+c > a phải đúng)\n\n")
-        
-        # Check for SSA ambiguous case (only for triangles)
-        if is_triangle:
-            ssa_solutions = self.detect_ssa_cases(inputs)
-            if ssa_solutions and len(ssa_solutions) > 1:
-                self.results_text.insert(tk.END, 
-                    f"⚠ Phát hiện trường hợp SSA mơ hồ: {len(ssa_solutions)} nghiệm có thể.\n\n")
-                # Process each SSA candidate
-                for idx, sol_assign in enumerate(ssa_solutions, start=1):
-                    self.results_text.insert(tk.END, f"--- Nghiệm SSA #{idx} ---\n")
-                    tri_candidate = kb.create_triangle_network()
-                    tri_candidate.reset()
-                    for k, v in sol_assign.items():
-                        if v is not None:
-                            tri_candidate.set_input(k, v, source='user')
-                    ok, diagnostics = tri_candidate.solve()
-                    res = tri_candidate.get_results()
-                    
-                    # Display candidate results
-                    for name in sorted(res.keys()):
-                        value = res[name]
-                        if value is not None:
-                            if name in ('a', 'b', 'c'):
-                                self.results_text.insert(tk.END, f"  {name} = {value:.6f}\n")
-                            elif name in ('A', 'B', 'C'):
-                                self.results_text.insert(tk.END, f"  {name} = {value:.6f}°\n")
-                    self.results_text.insert(tk.END, "\n")
-                    
-                    # Draw first candidate
-                    if idx == 1:
-                        a_val = res.get('a')
-                        b_val = res.get('b')
-                        c_val = res.get('c')
-                        if a_val is not None and b_val is not None and c_val is not None:
-                            self.draw_triangle(a_val, b_val, c_val, 
-                                             res.get('A'), res.get('B'), res.get('C'))
-                
-                self.canvas.draw()
-                self.results_text.see(tk.END)
-                return  # Don't process normal solve for SSA cases
-        
-        # Set inputs to network (including perimeter and area)
+
+        # --- [FIX LOGIC] XÁC ĐỊNH LOẠI HÌNH (TAM GIÁC HAY TỨ GIÁC) ---
+        tri_modes = {"triangle", "triangle_right", "triangle_equilateral", "triangle_isosceles"}
+        quad_modes = {"square", "rectangle", "rhombus", "parallelogram", "trapezoid", "quadrilateral"}
+
+        if shape_sel in tri_modes:
+            is_triangle = True
+        elif shape_sel in quad_modes:
+            is_triangle = False
+        else:  # auto
+            is_triangle = "Tam giác" in kind_msg
+
+        # --- Mapping tên tiếng Việt chuẩn để hiển thị ---
+        expected_map = {
+            "triangle": "Tam giác thường",
+            "triangle_right": "Tam giác vuông",
+            "triangle_equilateral": "Tam giác đều",
+            "triangle_isosceles": "Tam giác cân",
+            "square": "Hình vuông",
+            "rectangle": "Hình chữ nhật",
+            "rhombus": "Hình thoi",
+            "parallelogram": "Hình bình hành",
+            "trapezoid": "Hình thang",
+            "quadrilateral": "Tứ giác thường"
+        }
+        expected_shape = expected_map.get(shape_sel)
+
+        # --- SET INPUTS AND SOLVE NETWORK ---
         net.reset()
-        
-        # Handle special shape constraints
-        shape_sel = self.shape_var.get()
-        if shape_sel == "triangle_right":
-            # For right triangle, if no angle is 90, set one (prefer C)
-            if 'A' not in inputs and 'B' not in inputs and 'C' not in inputs:
-                inputs['C'] = 90.0
-        elif shape_sel == "square":
-            # For square, if one side is given, set all equal
-            # If one angle is 90, set all to 90
-            sides = [inputs.get('a'), inputs.get('b'), inputs.get('c'), inputs.get('d')]
-            sides_given = [s for s in sides if s is not None]
-            if len(sides_given) == 1:
-                val = sides_given[0]
-                if 'a' not in inputs: inputs['a'] = val
-                if 'b' not in inputs: inputs['b'] = val
-                if 'c' not in inputs: inputs['c'] = val
-                if 'd' not in inputs: inputs['d'] = val
-            angles = [inputs.get('A'), inputs.get('B'), inputs.get('C'), inputs.get('D')]
-            angles_given = [a for a in angles if a is not None]
-            if len(angles_given) == 1 and abs(angles_given[0] - 90) < 0.1:
-                if 'A' not in inputs: inputs['A'] = 90.0
-                if 'B' not in inputs: inputs['B'] = 90.0
-                if 'C' not in inputs: inputs['C'] = 90.0
-                if 'D' not in inputs: inputs['D'] = 90.0
-        elif not is_triangle:
-            # Heuristic cho tứ giác: nếu có góc vuông và thiếu cạnh đối, copy đối xứng
-            right_angle_any = any(name in ('A','B','C','D') and abs(val-90) <= 0.1 for name,val in inputs.items())
-            if right_angle_any:
-                if 'a' in inputs and 'c' not in inputs:
-                    inputs['c'] = inputs['a']
-                if 'c' in inputs and 'a' not in inputs:
-                    inputs['a'] = inputs['c']
-                if 'b' in inputs and 'd' not in inputs:
-                    inputs['d'] = inputs['b']
-                if 'd' in inputs and 'b' not in inputs:
-                    inputs['b'] = inputs['d']
-                # nếu chỉ 1 cạnh được nhập, giả định hình vuông
-                known_sides = [inputs[s] for s in ('a','b','c','d') if s in inputs]
-                if len(known_sides) == 1:
-                    val = known_sides[0]
-                    for s in ('a','b','c','d'):
-                        if s not in inputs:
-                            inputs[s] = val
-        
-        for name, value in inputs.items():
-            if name in net.vars:  # Only set if variable exists in network
-                net.set_input(name, value, source='user')
+        for k, v in inputs.items():
+            if k in net.vars:
+                net.set_input(k, v, 'user')
         
         # Solve
-        self.results_text.insert(tk.END, f"Đang tính toán ({kind_msg})...\n\n")
-        ok, diagnostics = net.solve()
-        
-        if not ok:
-            self.results_text.insert(tk.END, 
-                "⚠ Solver đạt giới hạn vòng lặp; kết quả có thể không đầy đủ.\n")
-            if diagnostics:
-                rounds = diagnostics.get('rounds', '?')
-                blocked = diagnostics.get('blocked_constraints', [])
-                self.results_text.insert(tk.END, f"  Vòng lặp: {rounds}, Ràng buộc bị chặn: {blocked}\n\n")
-        
-        # Get results
-        res = net.get_results()
-
-        # Validation & thiếu dữ liệu
-        if is_triangle:
-            for ang_name in ('A','B','C'):
-                ang_val = res.get(ang_name)
-                if ang_val is not None and (ang_val <= 0 or ang_val >= 180):
-                    self.results_text.insert(tk.END, f"\n⚠ Lỗi: Góc {ang_name} không hợp lệ cho tam giác (0 < góc < 180).\n")
-                    return
-            angs = [res.get('A'), res.get('B'), res.get('C')]
-            if all(a is not None for a in angs):
-                if abs(sum(angs) - 180.0) > 1e-3:
-                    self.results_text.insert(tk.END, "\n⚠ Lỗi: Tổng 3 góc tam giác phải = 180°.\n")
-                    return
-            known_basic = [k for k in ('a','b','c','A','B','C') if res.get(k) is not None]
-            if len(known_basic) < 3:
-                self.results_text.insert(tk.END, "\n⚠ Dữ liệu chưa đủ để xác định tam giác. Cần thêm ít nhất 3 giá trị cạnh/góc.\n")
-                return
-            # cảnh báo góc nhập sai so với tính toán
-            for ang_name in ('A','B','C'):
-                if ang_name in inputs and res.get(ang_name) is not None and abs(inputs[ang_name] - res[ang_name]) > 0.5:
-                    self.results_text.insert(tk.END, f"\n⚠ Góc {ang_name} nhập ({inputs[ang_name]}°) lệch so với tính toán ({res[ang_name]:.2f}°). Dùng giá trị tính.\n")
-            a_val,b_val,c_val = res.get('a'), res.get('b'), res.get('c')
-            if all(x is not None for x in (a_val,b_val,c_val)):
-                avg = (a_val+b_val+c_val)/3.0
-                if avg > 0:
-                    max_dev = max(abs(a_val-avg), abs(b_val-avg), abs(c_val-avg))/avg
-                    if max_dev < 0.001:
-                        self.results_text.insert(tk.END, "\nGhi chú: Tam giác gần đều (sai số <0.1%).\n")
+        solve_result = net.solve()
+        # Support both (ok, diagnostics) and just ok
+        if isinstance(solve_result, tuple):
+            ok, diagnostics = solve_result
         else:
-            quads = [res.get('A'), res.get('B'), res.get('C'), res.get('D')]
-            if all(a is not None for a in quads):
-                if abs(sum(quads) - 360.0) > 1e-2:
-                    self.results_text.insert(tk.END, "\n⚠ Lỗi: Tổng 4 góc tứ giác phải = 360°.\n")
-                    return
-        
-        # Classify shape
+            ok = solve_result
+            diagnostics = None
+
+        res = {k: net.vars[k].value if k in net.vars and net.vars[k].is_known() else None for k in net.vars}
+
+        # --- Phân loại hình thực tế ---
         shape_name, inheritance = self.classify_shape(net, res, is_triangle)
-        
+
+        # --- [FIX HIỂN THỊ] Ưu tiên hình đã chọn thủ công ---
+        manual_shapes = set(expected_map.keys())
+        if shape_sel in manual_shapes:
+            shape_name = expected_shape
+            if expected_shape not in inheritance:
+                inheritance.insert(0, expected_shape)
+            inheritance = list(dict.fromkeys([expected_shape] + inheritance))
+
         # Display shape information prominently
         self.results_text.insert(tk.END, "=" * 50 + "\n")
         self.results_text.insert(tk.END, f"📐 HÌNH DẠNG PHÁT HIỆN: {shape_name.upper()}\n")
@@ -775,11 +810,10 @@ class GeometryCalculatorGUI:
         
         if others:
             self.results_text.insert(tk.END, "\nKhác:\n")
-            # Prioritize perimeter and area
-            priority_vars = ['perimeter', 'area']
+            priority_vars = ['perimeter', 'area', 'h']
             for name in priority_vars:
                 if name in others:
-                    label = "Chu vi" if name == 'perimeter' else "Diện tích"
+                    label = "Chu vi" if name == 'perimeter' else ("Diện tích" if name == 'area' else "Chiều cao")
                     self.results_text.insert(tk.END, f"  {label} ({name}) = {others[name]:.6f}\n")
             for name in sorted(others.keys()):
                 if name not in priority_vars:
@@ -792,14 +826,14 @@ class GeometryCalculatorGUI:
                 angle_sum = A + B + C
                 if abs(angle_sum - 180.0) > 1e-3:
                     self.results_text.insert(tk.END, 
-                        f"\n⚠ LỖI: Tổng góc tam giác = {angle_sum:.2f}° (phải = 180°)\n")
+                        f"⚠ LỖI: Tổng góc tam giác = {angle_sum:.2f}° (phải = 180°)\n")
         else:
             A, B, C, D = res.get('A'), res.get('B'), res.get('C'), res.get('D')
             if A is not None and B is not None and C is not None and D is not None:
                 angle_sum = A + B + C + D
                 if abs(angle_sum - 360.0) > 1e-2:
                     self.results_text.insert(tk.END, 
-                        f"\n⚠ CẢNH BÁO: Tổng góc tứ giác = {angle_sum:.2f}° (phải = 360°)\n")
+                        f"⚠ CẢNH BÁO: Tổng góc tứ giác = {angle_sum:.2f}° (phải = 360°)\n")
         
         # Draw graph
         if is_triangle:
@@ -809,8 +843,7 @@ class GeometryCalculatorGUI:
             A_val = res.get('A')
             B_val = res.get('B')
             C_val = res.get('C')
-            if a_val is not None and b_val is not None and c_val is not None:
-                self.draw_triangle(a_val, b_val, c_val, A_val, B_val, C_val)
+            self.draw_triangle(a_val, b_val, c_val, A_val, B_val, C_val)
         else:
             a_val = res.get('a')
             b_val = res.get('b')
@@ -821,16 +854,39 @@ class GeometryCalculatorGUI:
             C_val = res.get('C')
             D_val = res.get('D')
             self.draw_rectangle(a_val, b_val, c_val, d_val, A_val, B_val, C_val, D_val)
-        
         self.canvas.draw()
-        self.results_text.see(tk.END)
 
-
-def main():
-    root = tk.Tk()
-    app = GeometryCalculatorGUI(root)  # Initialize GUI application
-    root.mainloop()
-
+    def update_graph_view(self):
+        """Cập nhật vùng đồ thị theo chế độ hiển thị"""
+        self.ax.clear()
+        self.ax.set_aspect('equal')
+        self.ax.axis('off')
+        # Chỉ còn vẽ hình học
+        if self.last_network is None or self.last_result is None:
+            self.ax.text(0.5, 0.5, 'Nhập dữ liệu và nhấn "Tính toán"\nđể xem đồ thị', 
+                         ha='center', va='center', fontsize=12, transform=self.ax.transAxes)
+        else:
+            if self.last_is_triangle:
+                a_val = self.last_result.get('a')
+                b_val = self.last_result.get('b')
+                c_val = self.last_result.get('c')
+                A_val = self.last_result.get('A')
+                B_val = self.last_result.get('B')
+                C_val = self.last_result.get('C')
+                self.draw_triangle(a_val, b_val, c_val, A_val, B_val, C_val)
+            else:
+                a_val = self.last_result.get('a')
+                b_val = self.last_result.get('b')
+                c_val = self.last_result.get('c')
+                d_val = self.last_result.get('d')
+                A_val = self.last_result.get('A')
+                B_val = self.last_result.get('B')
+                C_val = self.last_result.get('C')
+                D_val = self.last_result.get('D')
+                self.draw_rectangle(a_val, b_val, c_val, d_val, A_val, B_val, C_val, D_val)
+        self.canvas.draw()
 
 if __name__ == "__main__":
-    main()
+    root = tk.Tk()
+    app = GeometryCalculatorGUI(root)
+    root.mainloop()
