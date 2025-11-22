@@ -269,29 +269,44 @@ class GeometryCalculatorGUI:
         # --- LOGIC CHỌN THỦ CÔNG (MANUAL) ---
         if shape == "triangle":
             return kb.create_triangle_network(), "Tam giác thường (đã chọn)"
+            
         elif shape == "triangle_right":
             net = kb.create_triangle_network()
+            # Chỉ thêm C=90 nếu chưa có góc vuông nào
             has_right_angle = any(abs(inputs.get(ang, 0) - 90) < 0.1 for ang in ['A','B','C'])
             if not has_right_angle:
-                inputs['C'] = 90.0
+                inputs['C'] = 90.0 
             return net, "Tam giác vuông (đã chọn)"
+            
         elif shape == "triangle_equilateral":
             net = kb.create_triangle_network()
+            # Lấy 1 cạnh làm chuẩn để điền cho các cạnh kia
             val_a = inputs.get('a') or inputs.get('b') or inputs.get('c') or inputs.get('d')
             if val_a is not None:
                 inputs.update({'a': val_a, 'b': val_a, 'c': val_a})
+            # Tam giác đều thì góc bắt buộc là 60 (Đúng định nghĩa)
             inputs.update({'A': 60.0, 'B': 60.0, 'C': 60.0})
             return net, "Tam giác đều (đã chọn, auto-fill)"
+            
         elif shape == "triangle_isosceles":
             net = kb.create_triangle_network()
+            # [FIX] KHÔNG ĐƯỢC tự ý gán góc 70 độ.
+            # Chỉ đồng bộ cạnh nếu người dùng nhập thiếu.
             a, b, c = inputs.get('a'), inputs.get('b'), inputs.get('c')
-            if a and b and abs(a-b) < 1e-6:
-                inputs.setdefault('A', 70.0); inputs.setdefault('B', 70.0)
-            elif b and c and abs(b-c) < 1e-6:
-                inputs.setdefault('B', 70.0); inputs.setdefault('C', 70.0)
-            elif a and c and abs(a-c) < 1e-6:
-                inputs.setdefault('A', 70.0); inputs.setdefault('C', 70.0)
+            
+            # Logic: Nếu nhập 2 cạnh -> coi như bằng nhau (nếu chưa nhập cạnh thứ 3)
+            # Hoặc nếu nhập 1 cạnh -> chờ solver tính.
+            # Ở đây ta chỉ validate xem có cân thật không, hoặc copy giá trị nếu user nhập kiểu "a=10" (ý là cạnh bên)
+            
+            # Mẹo: Nếu user chỉ nhập a=10 và chọn cân -> Tự hiểu là a=b=10? 
+            # Tạm thời giữ logic copy cạnh, nhưng BỎ logic setdefault 70 độ.
+            if a is not None and b is None and c is None: # Chỉ nhập a
+                 inputs['b'] = a # Giả định cân tại C
+            elif b is not None and a is None and c is None:
+                 inputs['c'] = b
+            
             return net, "Tam giác cân (đã chọn)"
+            
         elif shape == "square":
             net = kb.create_square_network()
             val = inputs.get('a') or inputs.get('b') or inputs.get('c') or inputs.get('d')
@@ -299,23 +314,28 @@ class GeometryCalculatorGUI:
                 inputs.update({'a': val, 'b': val, 'c': val, 'd': val})
             inputs.update({'A': 90.0, 'B': 90.0, 'C': 90.0, 'D': 90.0})
             return net, "Hình vuông (đã chọn, auto-fill)"
+            
         elif shape == "rectangle":
             net = kb.create_rectangle_network()
+            # Đồng bộ cạnh đối
             val_ac = inputs.get('a') if inputs.get('a') is not None else inputs.get('c')
             if val_ac is not None: inputs.update({'a': val_ac, 'c': val_ac})
             val_bd = inputs.get('b') if inputs.get('b') is not None else inputs.get('d')
             if val_bd is not None: inputs.update({'b': val_bd, 'd': val_bd})
+            
             inputs.update({'A': 90.0, 'B': 90.0, 'C': 90.0, 'D': 90.0})
             msg = "Hình chữ nhật (đã chọn)"
             if val_ac and inputs.get('c') and abs(val_ac - inputs['c']) > 1e-6:
                  msg += " (Đã đồng bộ cạnh)"
             return net, msg
+
         elif shape == "rhombus":
             net = kb.create_rhombus_network()
             val = inputs.get('a')
             if val is not None:
                 inputs.update({'a': val, 'b': val, 'c': val, 'd': val})
             return net, "Hình thoi (đã chọn)"
+
         elif shape == "parallelogram":
             net = kb.create_parallelogram_network()
             if inputs.get('a'): inputs['c'] = inputs['a']
@@ -323,23 +343,22 @@ class GeometryCalculatorGUI:
             if inputs.get('A'): inputs['C'] = inputs['A']
             if inputs.get('B'): inputs['D'] = inputs['B']
             return net, "Hình bình hành (đã chọn)"
+
         elif shape == "trapezoid":
             net = kb.create_trapezoid_network()
             return net, "Hình thang (đã chọn)"
+
         elif shape == "quadrilateral":
             net = kb.create_quadrilateral_network()
             return net, "Tứ giác thường (đã chọn)"
-        
-        # --- LOGIC TỰ ĐỘNG (AUTO-DETECT) ---
+
+        # --- LOGIC TỰ ĐỘNG (AUTO-DETECT) - GIỮ NGUYÊN ---
         tri_side_names = {'a', 'b', 'c'}
         rect_side_names = {'a', 'b', 'c', 'd'}
         has_d = ('d' in inputs) or ('D' in inputs)
         
         if has_d: return kb.create_rectangle_network(), "Tứ giác (có d)"
         
-        tri_count = sum(1 for n in inputs if n in tri_side_names) + sum(1 for n in inputs if n in ['A','B','C'])
-        rect_count = sum(1 for n in inputs if n in rect_side_names) + sum(1 for n in inputs if n in ['A','B','C','D'])
-
         if sum(1 for n in inputs if n in tri_side_names) >= 3:
              return kb.create_triangle_network(), "Tam giác (3 cạnh)"
         
@@ -347,11 +366,14 @@ class GeometryCalculatorGUI:
         tri_net = kb.create_triangle_network()
         rect_net = kb.create_rectangle_network()
         tri_net.reset(); rect_net.reset()
+        # Nạp input tạm để chấm điểm
         for k, v in inputs.items():
             if k in tri_net.vars: tri_net.set_input(k, v, 'temp')
             if k in rect_net.vars: rect_net.set_input(k, v, 'temp')
+            
         tscore = self.score_network(tri_net, rect_net)
         rscore = self.score_network(rect_net, tri_net)
+        
         if tscore == 0 and rscore == 0:
             return None, "Không đủ dữ liệu"
         if tscore >= rscore:
@@ -693,7 +715,44 @@ class GeometryCalculatorGUI:
         if not inputs:
             messagebox.showwarning("Cảnh báo", "Vui lòng nhập ít nhất một giá trị!")
             return
-        
+
+        # --- KIỂM TRA LOGIC GÓC TAM GIÁC ---
+        shape_sel = self.shape_var.get()
+        tri_modes = {"triangle", "triangle_right", "triangle_equilateral", "triangle_isosceles"}
+        is_triangle = shape_sel in tri_modes or (shape_sel == "auto" and any(k in inputs for k in ['a','b','c']))
+
+        if is_triangle:
+            # Kiểm tra từng góc
+            for ang in ['A', 'B', 'C']:
+                if ang in inputs and (inputs[ang] <= 0 or inputs[ang] >= 180):
+                    messagebox.showerror("Lỗi", f"Góc {ang} = {inputs[ang]}° không hợp lệ cho tam giác (phải trong khoảng (0, 180))")
+                    return
+            # Kiểm tra tổng góc nếu nhập đủ
+            angle_sum = sum(inputs.get(ang, 0) for ang in ['A', 'B', 'C'] if ang in inputs)
+            if sum(1 for ang in ['A', 'B', 'C'] if ang in inputs) == 3 and (angle_sum < 180.0 - 1e-6 or angle_sum > 180.0 + 1e-6):
+                messagebox.showerror("Lỗi", f"Tổng 3 góc tam giác = {angle_sum:.2f}° không hợp lệ (phải đúng bằng 180°)")
+                return
+            # --- Kiểm tra xung đột dữ liệu tam giác vuông ---
+            if shape_sel == "triangle_right":
+                # Nếu nhập đủ 3 cạnh, kiểm tra có phải tam giác vuông không
+                a, b, c = inputs.get('a'), inputs.get('b'), inputs.get('c')
+                if a and b and c:
+                    # Sắp xếp để c là cạnh lớn nhất
+                    sides = sorted([a, b, c])
+                    if abs(sides[2]**2 - (sides[0]**2 + sides[1]**2)) > 1e-2:
+                        messagebox.showerror("Lỗi", "Ba cạnh nhập vào không tạo thành tam giác vuông (không thỏa mãn định lý Pythagoras). Vui lòng kiểm tra lại!")
+                        return
+                # Nếu nhập góc vuông và cạnh đối diện không phải là cạnh lớn nhất
+                for ang, side in zip(['A', 'B', 'C'], ['a', 'b', 'c']):
+                    if ang in inputs and abs(inputs[ang] - 90) < 1e-2:
+                        # Góc vuông phải đối diện cạnh lớn nhất
+                        a, b, c = inputs.get('a'), inputs.get('b'), inputs.get('c')
+                        if a and b and c:
+                            max_side = max(a, b, c)
+                            if abs(inputs.get(side, 0) - max_side) > 1e-2:
+                                messagebox.showerror("Lỗi", f"Góc {ang} là góc vuông nhưng cạnh đối diện ({side}) không phải là cạnh lớn nhất. Dữ liệu không hợp lệ cho tam giác vuông.")
+                                return
+
         # Validate perimeter, area, height
         if 'perimeter' in inputs and inputs['perimeter'] <= 0:
             messagebox.showerror("Lỗi", "Chu vi phải > 0")

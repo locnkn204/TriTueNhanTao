@@ -151,14 +151,40 @@ class ConstraintNetwork:
         for n in constraint.nodes:
             self.graph.add_edge(constraint.name, n)
 
-    def set_input(self, name: str, value: float, source: str = 'user'):
+    def set_input(self, name: str, value: float, source: str = 'user', tolerance: float = 1e-2) -> Tuple[bool, str]:
+        """
+        Set input value with consistency check.
+        Returns: (Success, Message)
+        """
         if name not in self.vars:
             self.add_variable(name)
-        changed = self.vars[name].set(value, source=source)
+        
+        var = self.vars[name]
+        
+        # 1. Nếu biến đã biết giá trị từ trước (do máy tính hoặc user nhập trước đó)
+        if var.is_known():
+            current_val = var.value
+            # Kiểm tra độ lệch
+            if abs(current_val - value) > tolerance:
+                # XUNG ĐỘT PHÁT HIỆN!
+                return False, (f"Xung đột dữ liệu! Giá trị '{name}' bạn nhập ({value}) "
+                               f"mâu thuẫn với giá trị đã được tính toán/nhập trước đó ({current_val:.4f}).\n"
+                               f"Chênh lệch: {abs(current_val - value):.4f}")
+            else:
+                # Nếu chênh lệch nhỏ (sai số làm tròn), ưu tiên cập nhật theo input mới nhất của user
+                # để user thấy đúng số mình nhập (UX tốt hơn)
+                var.set(value, source=source)
+                return True, "Updated (refinement)"
+
+        # 2. Nếu biến chưa biết, gán bình thường và lan truyền
+        changed = var.set(value, source=source)
         if changed:
             if self.debug:
                 self.log(f"Input set {name}={value} (source={source})")
+            # Lan truyền ngay lập tức để phát hiện xung đột sớm cho các biến khác
             self.propagate_from(name)
+            
+        return True, "Success"
 
     def propagate_from(self, start_name: str):
         """Queue-based incremental propagation with provenance logging."""
