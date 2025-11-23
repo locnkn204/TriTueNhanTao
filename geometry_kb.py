@@ -427,6 +427,33 @@ def create_triangle_network() -> ConstraintNetwork:
         description="Reverse area: compute side from area and height"
     ))
 
+    # --- ADD: nếu tam giác đã biết 3 góc = 60° (tam giác đều) và perimeter thì suy ra 3 cạnh và diện tích
+    def equilateral_from_perimeter(netw, known, unknown):
+        # cần perimeter và Cả 3 góc đã biết và đều ~60°
+        if 'perimeter' in known and all(netw.vars.get(ang) and netw.vars[ang].is_known() for ang in ('A','B','C')):
+            A = netw.vars['A'].value; B = netw.vars['B'].value; C = netw.vars['C'].value
+            if abs(A-60.0) < 1e-6 and abs(B-60.0) < 1e-6 and abs(C-60.0) < 1e-6:
+                p = netw.vars['perimeter'].value
+                if p is None:
+                    return None
+                a = p / 3.0
+                area = (math.sqrt(3.0)/4.0) * a * a
+                res = {}
+                # chỉ ghi khi chưa biết
+                for s in ('a','b','c'):
+                    if not netw.vars[s].is_known():
+                        res[s] = a
+                if not netw.vars['area'].is_known():
+                    res['area'] = area
+                return res or None
+        return None
+    net.add_constraint(Constraint(
+        name="equilateral_from_perimeter",
+        nodes=['perimeter','A','B','C','a','b','c','area'],
+        flex_func=equilateral_from_perimeter,
+        description="If A=B=C=60 and perimeter known -> a=b=c=p/3 and area."
+    ))
+
     return net
 
 # --- CÁC HÀM BỔ TRỢ ---
@@ -805,6 +832,45 @@ def create_parallelogram_network() -> ConstraintNetwork:
         flex_func=para_perimeter_flex,
         description="Flex: compute a/b (and mirror c/d) from perimeter for parallelogram"
     ))
+
+    # ADD: nếu biết perimeter + area + góc A thì giải a,b từ sum = p/2 và product = area/sin(A)
+    def para_perimeter_area_with_angle(netw, known, unknown):
+        if 'perimeter' in known and 'area' in known and netw.vars.get('A') and netw.vars['A'].is_known():
+            p = netw.vars['perimeter'].value
+            area = netw.vars['area'].value
+            Adeg = netw.vars['A'].value
+            if p is None or area is None or Adeg is None:
+                return None
+            sinA = math.sin(get_rad(Adeg))
+            if abs(sinA) < 1e-12:
+                return None
+            prod = area / sinA
+            s = p / 2.0
+            disc = s*s - 4.0*prod
+            if disc < -1e-9:
+                return None
+            disc = max(disc, 0.0)
+            r = math.sqrt(disc)
+            a_candidate = (s + r)/2.0
+            b_candidate = (s - r)/2.0
+            # ensure positive
+            if a_candidate <= 0 or b_candidate <= 0:
+                return None
+            res = {}
+            # nếu chưa biết a/b thì gán
+            if not netw.vars['a'].is_known(): res['a'] = a_candidate
+            if not netw.vars['b'].is_known(): res['b'] = b_candidate
+            # mirror to c,d if cần
+            if not netw.vars['c'].is_known(): res['c'] = res.get('a', netw.vars['a'].value)
+            if not netw.vars['d'].is_known(): res['d'] = res.get('b', netw.vars['b'].value)
+            return res or None
+    net.add_constraint(Constraint(
+        name="para_perimeter_area_with_angle",
+        nodes=['perimeter','area','A','a','b','c','d'],
+        flex_func=para_perimeter_area_with_angle,
+        description="From perimeter+area+angle A compute a,b for parallelogram"
+    ))
+
     return net
 
 # --- 4. HÌNH THOI ---
@@ -850,6 +916,35 @@ def create_rhombus_network() -> ConstraintNetwork:
         target='a',
         description="Compute side a = perimeter/4 for rhombus (then rhombus_equal_sides copies to others)"
     ))
+
+    # ADD: nếu biết perimeter + area -> a = p/4, suy sin(A) = area / a^2 -> đặt góc A (và C)
+    def rhombus_perimeter_area_to_angle(netw, known, unknown):
+        if 'perimeter' in known and 'area' in known:
+            p = netw.vars['perimeter'].value
+            area = netw.vars['area'].value
+            if p is None or area is None: return None
+            a = p / 4.0
+            if a <= 0: return None
+            sinA = area / (a*a)
+            if sinA < -1.0 - 1e-12 or sinA > 1.0 + 1e-12:
+                return None
+            sinA = max(-1.0, min(1.0, sinA))
+            Adeg = math.degrees(math.asin(sinA))
+            # choose acute principal; C = 180 - A (opposite)
+            res = {}
+            if not netw.vars['a'].is_known(): res['a'] = a
+            # set angles if not set
+            if not netw.vars['A'].is_known(): res['A'] = Adeg
+            if not netw.vars['C'].is_known(): res['C'] = 180.0 - Adeg
+            # mirror sides via existing rhombus_equal_sides constraint
+            return res or None
+    net.add_constraint(Constraint(
+        name="rhombus_perimeter_area_to_angle",
+        nodes=['perimeter','area','a','A','C'],
+        flex_func=rhombus_perimeter_area_to_angle,
+        description="From perimeter+area compute side and angle for rhombus"
+    ))
+
     return net
 
 # --- 5. HÌNH CHỮ NHẬT ---
@@ -899,40 +994,62 @@ def create_rectangle_network() -> ConstraintNetwork:
         target='a',
         description="Compute a from area and b"
     ))
-    # FLEX: từ perimeter tính cạnh còn lại cho rectangle (perimeter = 2*(a + b))
-    def rect_perimeter_flex(netw, known, unknown):
-        res = {}
-        if 'perimeter' not in known:
-            return None
-        p = netw.vars['perimeter'].value
-        if p is None:
-            return None
-        # đồng bộ các cạnh đối nếu có
-        if netw.vars.get('c') and netw.vars['c'].is_known() and not netw.vars['a'].is_known():
-            res['a'] = netw.vars['c'].value
-        if netw.vars.get('d') and netw.vars['d'].is_known() and not netw.vars['b'].is_known():
-            res['b'] = netw.vars['d'].value
-        # nếu biết a -> b = p/2 - a
-        if netw.vars['a'].is_known() and not netw.vars['b'].is_known():
-            b_val = p/2.0 - netw.vars['a'].value
-            if b_val > 0:
-                res['b'] = b_val
-                if not netw.vars['c'].is_known(): res['c'] = netw.vars['a'].value
-                if not netw.vars['d'].is_known(): res['d'] = b_val
-        # nếu biết b -> a = p/2 - b
-        if netw.vars['b'].is_known() and not netw.vars['a'].is_known():
-            a_val = p/2.0 - netw.vars['b'].value
-            if a_val > 0:
-                res['a'] = a_val
-                if not netw.vars['c'].is_known(): res['c'] = a_val
-                if not netw.vars['d'].is_known(): res['d'] = netw.vars['b'].value
-        return res or None
+
+    # ADD: giải hệ a + b = p/2 và a*b = area để suy a,b (nếu biết perimeter & area)
+    def rect_perimeter_area_solve(netw, known, unknown):
+        if 'perimeter' in known and 'area' in known:
+            p = netw.vars['perimeter'].value
+            area = netw.vars['area'].value
+            if p is None or area is None: return None
+            s = p / 2.0
+            disc = s*s - 4.0*area
+            if disc < -1e-9:
+                return None
+            disc = max(disc, 0.0)
+            r = math.sqrt(disc)
+            # two possible a roots
+            a1 = (s + r)/2.0
+            a2 = (s - r)/2.0
+            candidates = [x for x in (a1, a2) if x > 1e-12]
+            if not candidates:
+                return None
+            res = {}
+            # if one side known, compute the other
+            if netw.vars['a'].is_known() and not netw.vars['b'].is_known():
+                b_val = s - netw.vars['a'].value
+                if b_val > 0 and abs(netw.vars['a'].value * b_val - area) < 1e-6:
+                    res['b'] = b_val
+            elif netw.vars['b'].is_known() and not netw.vars['a'].is_known():
+                a_val = s - netw.vars['b'].value
+                if a_val > 0 and abs(a_val * netw.vars['b'].value - area) < 1e-6:
+                    res['a'] = a_val
+            elif not netw.vars['a'].is_known() and not netw.vars['b'].is_known():
+                a_val = min(candidates)
+                b_val = s - a_val
+                if b_val > 0:
+                    res['a'] = a_val
+                    res['b'] = b_val
+            # mirror to c,d (rectangle)
+            if 'a' in res and not netw.vars['c'].is_known(): res['c'] = res['a']
+            if 'b' in res and not netw.vars['d'].is_known(): res['d'] = res['b']
+            return res or None
     net.add_constraint(Constraint(
-        name="rect_perimeter_flex",
-        nodes=['perimeter','a','b','c','d'],
-        flex_func=rect_perimeter_flex,
-        description="Flex: compute a/b and mirror c/d from perimeter for rectangle"
+        name="rect_perimeter_area_solve",
+        nodes=['perimeter','area','a','b','c','d'],
+        flex_func=rect_perimeter_area_solve,
+        description="From perimeter+area compute rectangle sides solving quadratic"
     ))
+
+    # ALSO ensure square's perimeter forward exists (square built on rectangle)
+    net.add_constraint(Constraint(
+        name="square_perimeter_to_side_forward",
+        nodes=['perimeter','a'],
+        forward_func=lambda v: (v['perimeter'] / 4.0) if (v.get('perimeter') is not None and v['perimeter']>0) else None,
+        dependencies=['perimeter'],
+        target='a',
+        description="Square: a = perimeter/4"
+    ))
+
     return net
 
 def create_square_network() -> ConstraintNetwork:
@@ -985,6 +1102,74 @@ def create_square_network() -> ConstraintNetwork:
         dependencies=['a'],
         target='d1',
         description="Square diagonal = a * sqrt(2)"
+    ))
+
+    return net
+
+def create_equilateral_triangle_network() -> ConstraintNetwork:
+    """
+    Equilateral triangle network:
+    - built on triangle network
+    - enforce a=b=c (flex)
+    - set angles A=B=C=60 (for unknown angles)
+    - area = sqrt(3)/4 * a^2
+    - perimeter = 3 * a
+    """
+    net = create_triangle_network()
+
+    # Flex: copy any known side to all others
+    def eq_sides(netw, known, unknown):
+        val = None
+        for k in ('a','b','c'):
+            if k in known:
+                val = netw.vars[k].value
+                break
+        if val is None:
+            return None
+        res = {}
+        for k in ('a','b','c'):
+            if k not in known:
+                res[k] = val
+        return res or None
+    net.add_constraint(Constraint(
+        name="equilateral_sides_equal",
+        nodes=['a','b','c'],
+        flex_func=eq_sides,
+        description="Enforce a=b=c for equilateral triangle"
+    ))
+
+    # Flex: set unknown angles to 60° (do not override known angles)
+    def eq_angles(netw, known, unknown):
+        res = {}
+        for ang in ('A','B','C'):
+            if ang not in known:
+                res[ang] = 60.0
+        return res or None
+    net.add_constraint(Constraint(
+        name="equilateral_angles_60",
+        nodes=['A','B','C'],
+        flex_func=eq_angles,
+        description="Set angles A=B=C=60 for equilateral triangle"
+    ))
+
+    # area = sqrt(3)/4 * a^2
+    net.add_constraint(Constraint(
+        name="equilateral_area",
+        nodes=['a','area'],
+        forward_func=lambda v: (math.sqrt(3.0)/4.0) * v['a']**2 if (v.get('a') is not None) else None,
+        dependencies=['a'],
+        target='area',
+        description="Area for equilateral triangle"
+    ))
+
+    # perimeter = 3 * a
+    net.add_constraint(Constraint(
+        name="equilateral_perimeter",
+        nodes=['a','perimeter'],
+        forward_func=lambda v: (3.0 * v['a']) if (v.get('a') is not None) else None,
+        dependencies=['a'],
+        target='perimeter',
+        description="Perimeter for equilateral triangle"
     ))
 
     return net

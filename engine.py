@@ -153,75 +153,88 @@ class ConstraintNetwork:
 
     def set_input(self, name: str, value: float, source: str = 'user', tolerance: float = 1e-2) -> Tuple[bool, str]:
         """
-        Set input value with consistency check.
-        Returns: (Success, Message)
+        Gán giá trị đầu vào với cơ chế kiểm tra tính nhất quán (Consistency Check).
+        Trả về: (Thành công: bool, Thông báo: str)
         """
         if name not in self.vars:
             self.add_variable(name)
         
         var = self.vars[name]
         
-        # 1. Nếu biến đã biết giá trị từ trước (do máy tính hoặc user nhập trước đó)
+        # 1. KIỂM TRA XUNG ĐỘT TRỰC TIẾP
+        # Nếu biến đã có giá trị (do máy tính đã tính ra từ trước), kiểm tra xem giá trị mới nhập có khớp không.
         if var.is_known():
             current_val = var.value
-            # Kiểm tra độ lệch
+            # Nếu chênh lệch quá lớn -> Báo lỗi mâu thuẫn
             if abs(current_val - value) > tolerance:
-                # XUNG ĐỘT PHÁT HIỆN!
                 return False, (f"Xung đột dữ liệu! Giá trị '{name}' bạn nhập ({value}) "
-                               f"mâu thuẫn với giá trị đã được tính toán/nhập trước đó ({current_val:.4f}).\n"
+                               f"mâu thuẫn với giá trị đã tính toán trước đó ({current_val:.4f}).\n"
                                f"Chênh lệch: {abs(current_val - value):.4f}")
             else:
-                # Nếu chênh lệch nhỏ (sai số làm tròn), ưu tiên cập nhật theo input mới nhất của user
-                # để user thấy đúng số mình nhập (UX tốt hơn)
+                # Nếu chênh lệch nhỏ (sai số làm tròn), cập nhật lại để giao diện hiện đúng số user nhập
                 var.set(value, source=source)
                 return True, "Updated (refinement)"
 
-        # 2. Nếu biến chưa biết: lưu snapshot toàn bộ trạng thái, gán, propagate, rồi kiểm tra chu vi.
-        #    Nếu mâu thuẫn => rollback toàn bộ mạng và trả lỗi.
+        # 2. GÁN GIÁ TRỊ VÀ LAN TRUYỀN (PROPAGATE)
+        # Lưu trạng thái cũ để Rollback (hoàn tác) nếu phát hiện lỗi sau khi tính toán
         prev_states = {n: (v.value, v.source) for n, v in self.vars.items()}
+        
         changed = var.set(value, source=source)
         if changed:
             if self.debug:
                 self.log(f"Input set {name}={value} (source={source})")
-            # Lan truyền trước để mạng có cơ hội tính các cạnh còn lại
+            
+            # Kích hoạt lan truyền để tính ra các biến phụ thuộc
             self.propagate_from(name)
 
-            # Kiểm tra nhanh tính hợp lệ của 'perimeter' SO SÁNH SAU KHI PROPAGATE
-            tol = 1e-4  # Nới lỏng dung sai một chút
+            # 3. KIỂM TRA TỔNG QUÁT: CHU VI (PERIMETER CHECK)
+            # Logic này sửa lỗi "Dương tính giả" khi mạng lưới có biến thừa (như biến 'd' trong tam giác)
+            tol = 1e-4
             if 'perimeter' in self.vars and self.vars['perimeter'].is_known() and self.vars['perimeter'].source == 'user':
                 p = self.vars['perimeter'].value
 
-                # Danh sách các biến cạnh có trong mạng lưới này
-                possible_sides = ['a', 'b', 'c', 'd']
-                sides_in_net = [s for s in possible_sides if s in self.vars]
+                # [FIX THÔNG MINH] Lọc danh sách cạnh: Chỉ lấy những cạnh THỰC SỰ liên kết với Chu vi
+                # Thay vì lấy tất cả a,b,c,d, ta quét xem biến perimeter dính dáng đến ai.
+                relevant_sides = set()
+                perimeter_var = self.vars['perimeter']
+                
+                # Quét tất cả các ràng buộc (constraints) dính vào biến perimeter
+                for cons in perimeter_var.constraints:
+                    # Nếu ràng buộc đó có chứa các biến cạnh a,b,c,d -> Đó là cạnh liên quan
+                    for node in cons.nodes:
+                        if node in ('a', 'b', 'c', 'd'):
+                            relevant_sides.add(node)
+                
+                # Danh sách cạnh cần kiểm tra (Ví dụ Tam giác chỉ còn a,b,c. Biến d bị loại bỏ)
+                sides_in_net = list(relevant_sides)
 
-                # Tính tổng các cạnh ĐÃ BIẾT
+                # Tính tổng các cạnh ĐÃ BIẾT trong danh sách lọc
                 known_sides_vals = [self.vars[s].value for s in sides_in_net if self.vars[s].is_known()]
                 sum_known_sides = sum(known_sides_vals)
 
-                # Kiểm tra xem đã biết hết tất cả các cạnh chưa
-                all_sides_known = (len(known_sides_vals) == len(sides_in_net))
+                # Kiểm tra xem đã biết đủ hết các cạnh liên quan chưa
+                all_relevant_sides_known = (len(known_sides_vals) == len(sides_in_net))
 
-                if all_sides_known:
-                    # TRƯỜNG HỢP 1: Đã biết hết cạnh -> Tổng phải BẰNG chu vi (cho phép sai số nhỏ)
+                if all_relevant_sides_known:
+                    # TRƯỜNG HỢP 1: Đã biết đủ cạnh -> Tổng phải BẰNG chu vi (cho phép sai số)
                     if abs(sum_known_sides - p) > tol:
-                        # rollback
+                        # Có lỗi -> Hoàn tác (Rollback)
                         for n, (val, src) in prev_states.items():
                             self.vars[n].value = val
                             self.vars[n].source = src
                         return False, (f"Mâu thuẫn toán học: Tổng các cạnh tính được ({sum_known_sides:.4f}) "
                                        f"khác với Chu vi bạn nhập ({p}).")
                 else:
-                    # TRƯỜNG HỢP 2: Chưa biết hết cạnh -> Tổng các cạnh đã biết phải NHỎ HƠN chu vi
+                    # TRƯỜNG HỢP 2: Chưa biết đủ cạnh -> Tổng hiện tại phải NHỎ HƠN chu vi
                     # (Phải chừa chỗ cho cạnh chưa biết > 0)
                     if sum_known_sides >= p - tol:
-                        # rollback
+                        # Có lỗi -> Hoàn tác
                         for n, (val, src) in prev_states.items():
                             self.vars[n].value = val
                             self.vars[n].source = src
                         return False, (f"Giá trị không hợp lệ: Chu vi = {p} nhỏ hơn hoặc bằng tổng các cạnh đã biết ({sum_known_sides:.4f}). "
-                                       "Không còn dư địa cho các cạnh còn thiếu.")
-            # Nếu vừa gán hợp lệ và không mâu thuẫn, giữ trạng thái sau propagate
+                                       "Không còn dư địa cho cạnh còn thiếu.")
+        
         return True, "Success"
 
     def propagate_from(self, start_name: str):
