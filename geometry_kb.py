@@ -736,376 +736,225 @@ def create_trapezoid_network() -> ConstraintNetwork:
         flex_func=trap_height_from_sides
     ))
 
-    # 6. Góc kề bù: A+D=180, B+C=180
-    def trapezoid_angles(netw, known, unknown):
-        res = {}
-        if 'A' in known and 'D' not in known: res['D'] = 180.0 - netw.vars['A'].value
-        elif 'D' in known and 'A' not in known: res['A'] = 180.0 - netw.vars['D'].value
-        if 'B' in known and 'C' not in known: res['C'] = 180.0 - netw.vars['B'].value
-        elif 'C' in known and 'B' not in known: res['B'] = 180.0 - netw.vars['C'].value
-        return res if res else None
-    net.add_constraint(Constraint(
-        name="trap_parallel_angles",
-        nodes=['A', 'B', 'C', 'D'],
-        flex_func=trapezoid_angles
-    ))
-
     return net
 
 # --- 3. HÌNH BÌNH HÀNH ---
 def create_parallelogram_network() -> ConstraintNetwork:
     net = create_quadrilateral_network()
-    # Cạnh đối bằng nhau (a=c, b=d)
-    def para_sides(netw, known, unknown):
+    
+    # 1. Cạnh đối, Góc đối
+    def para_props(netw, known, unknown):
         res = {}
+        # Đồng bộ cạnh
         if 'a' in known and 'c' not in known: res['c'] = netw.vars['a'].value
         if 'c' in known and 'a' not in known: res['a'] = netw.vars['c'].value
         if 'b' in known and 'd' not in known: res['d'] = netw.vars['b'].value
         if 'd' in known and 'b' not in known: res['b'] = netw.vars['d'].value
-        return res
-    net.add_constraint(Constraint(name="para_opp_sides", nodes=['a','b','c','d'], flex_func=para_sides))
-    # Góc đối bằng nhau & Góc kề bù
-    def para_angles(netw, known, unknown):
-        res = {}
+        # Đồng bộ góc
         if 'A' in known and 'C' not in known: res['C'] = netw.vars['A'].value
         if 'B' in known and 'D' not in known: res['D'] = netw.vars['B'].value
+        # Góc kề bù
         if 'A' in known and 'B' not in known: res['B'] = 180 - netw.vars['A'].value
         if 'B' in known and 'A' not in known: res['A'] = 180 - netw.vars['B'].value
         return res
-    net.add_constraint(Constraint(name="para_opp_angles", nodes=['A','B','C','D'], flex_func=para_angles))
-    # Diện tích = a * h (hoặc a * b * sinA)
+    net.add_constraint(Constraint(name="para_props", nodes=['a','b','c','d','A','B','C','D'], flex_func=para_props))
+
+    # 2. Diện tích S = a*h (và ngược lại)
+    def para_area_h_flex(netw, known, unknown):
+        if 'area' in known:
+            s = netw.vars['area'].value
+            if 'a' in known and 'h' not in known: return {'h': s / netw.vars['a'].value}
+            if 'h' in known and 'a' not in known: return {'a': s / netw.vars['h'].value}
+        else:
+            if 'a' in known and 'h' in known: return {'area': netw.vars['a'].value * netw.vars['h'].value}
+        return None
+    net.add_constraint(Constraint(name="para_area_h", nodes=['area','a','h'], flex_func=para_area_h_flex))
+
+    # 3. Diện tích S = a*b*sinA
     net.add_constraint(Constraint(
-        name="para_area_base_height",
-        nodes=['area', 'a', 'h'],
-        forward_func=lambda v: v['a'] * v['h'],
-        target='area'
-    ))
-    net.add_constraint(Constraint(
-        name="para_area_sine",
-        nodes=['area', 'a', 'b', 'A'],
+        name="para_area_sine", nodes=['area', 'a', 'b', 'A'],
         forward_func=lambda v: v['a'] * v['b'] * math.sin(get_rad(v['A'])),
-        target='area'
+        dependencies=['a','b','A'], target='area'
     ))
-    # Định lý đường chéo HBH: d1^2 + d2^2 = 2(a^2 + b^2)
-    def para_diagonals_law(netw, known, unknown):
-        res = {}
-        if 'a' in known and 'b' in known:
-            a, b = netw.vars['a'].value, netw.vars['b'].value
-            sum_sq = 2 * (a**2 + b**2)
-            if 'd1' in known and 'd2' not in unknown:
-                res['d2'] = safe_sqrt(sum_sq - netw.vars['d1'].value**2)
-            elif 'd2' in known and 'd1' not in unknown:
-                res['d1'] = safe_sqrt(sum_sq - netw.vars['d2'].value**2)
-        return res
-    net.add_constraint(Constraint(name="para_diag_law", nodes=['a','b','d1','d2'], flex_func=para_diagonals_law))
-    # FLEX: từ perimeter tính cạnh còn lại cho parallelogram (p = 2*(a+b))
+
+    # 4. Tính cạnh từ CHU VI (P = 2(a+b))
+    # Chỉ chạy khi biết P và 1 cạnh -> Ra cạnh kia. KHÔNG tự chia đôi P.
     def para_perimeter_flex(netw, known, unknown):
         res = {}
-        if 'perimeter' not in known:
-            return None
-        p = netw.vars['perimeter'].value
-        if p is None:
-            return None
-        # nếu biết c hoặc d, đồng bộ về a/b nếu cần (a=c, b=d)
-        if netw.vars.get('c') and netw.vars['c'].is_known() and not netw.vars['a'].is_known():
-            res['a'] = netw.vars['c'].value
-        if netw.vars.get('d') and netw.vars['d'].is_known() and not netw.vars['b'].is_known():
-            res['b'] = netw.vars['d'].value
-        # nếu biết a, tính b = p/2 - a
-        if netw.vars['a'].is_known() and not netw.vars['b'].is_known():
-            b_val = p/2.0 - netw.vars['a'].value
-            if b_val > 0:
-                res['b'] = b_val
-                if not netw.vars['d'].is_known(): res['d'] = b_val
-                if not netw.vars['c'].is_known(): res['c'] = netw.vars['a'].value
-        # nếu biết b, tính a = p/2 - b
-        if netw.vars['b'].is_known() and not netw.vars['a'].is_known():
-            a_val = p/2.0 - netw.vars['b'].value
-            if a_val > 0:
-                res['a'] = a_val
-                if not netw.vars['c'].is_known(): res['c'] = a_val
-                if not netw.vars['d'].is_known(): res['d'] = netw.vars['b'].value
-        return res or None
-    net.add_constraint(Constraint(
-        name="para_perimeter_flex",
-        nodes=['perimeter','a','b','c','d'],
-        flex_func=para_perimeter_flex,
-        description="Flex: compute a/b (and mirror c/d) from perimeter for parallelogram"
-    ))
-
-    # ADD: nếu biết perimeter + area + góc A thì giải a,b từ sum = p/2 và product = area/sin(A)
-    def para_perimeter_area_with_angle(netw, known, unknown):
-        if 'perimeter' in known and 'area' in known and netw.vars.get('A') and netw.vars['A'].is_known():
+        if 'perimeter' in known:
             p = netw.vars['perimeter'].value
-            area = netw.vars['area'].value
-            Adeg = netw.vars['A'].value
-            if p is None or area is None or Adeg is None:
-                return None
-            sinA = math.sin(get_rad(Adeg))
-            if abs(sinA) < 1e-12:
-                return None
-            prod = area / sinA
-            s = p / 2.0
-            disc = s*s - 4.0*prod
-            if disc < -1e-9:
-                return None
-            disc = max(disc, 0.0)
-            r = math.sqrt(disc)
-            a_candidate = (s + r)/2.0
-            b_candidate = (s - r)/2.0
-            # ensure positive
-            if a_candidate <= 0 or b_candidate <= 0:
-                return None
-            res = {}
-            # nếu chưa biết a/b thì gán
-            if not netw.vars['a'].is_known(): res['a'] = a_candidate
-            if not netw.vars['b'].is_known(): res['b'] = b_candidate
-            # mirror to c,d if cần
-            if not netw.vars['c'].is_known(): res['c'] = res.get('a', netw.vars['a'].value)
-            if not netw.vars['d'].is_known(): res['d'] = res.get('b', netw.vars['b'].value)
-            return res or None
-    net.add_constraint(Constraint(
-        name="para_perimeter_area_with_angle",
-        nodes=['perimeter','area','A','a','b','c','d'],
-        flex_func=para_perimeter_area_with_angle,
-        description="From perimeter+area+angle A compute a,b for parallelogram"
-    ))
+            # Biết a -> tính b
+            if 'a' in known and 'b' not in known:
+                b_val = p/2.0 - netw.vars['a'].value
+                if b_val > 0: 
+                    res['b'] = b_val; res['d'] = b_val
+            # Biết b -> tính a
+            elif 'b' in known and 'a' not in known:
+                a_val = p/2.0 - netw.vars['b'].value
+                if a_val > 0: 
+                    res['a'] = a_val; res['c'] = a_val
+        return res
+    net.add_constraint(Constraint(name="para_perimeter_flex", nodes=['perimeter','a','b','c','d'], flex_func=para_perimeter_flex))
+
+    # 5. Giải hệ: Biết P, Area, Góc A -> Tìm a, b
+    def para_solve_system(netw, known, unknown):
+        if {'perimeter','area','A'}.issubset(known) and not (netw.vars['a'].is_known() and netw.vars['b'].is_known()):
+            p = netw.vars['perimeter'].value
+            s = netw.vars['area'].value
+            sinA = math.sin(get_rad(netw.vars['A'].value))
+            if sinA > 1e-9:
+                prod = s / sinA # a*b
+                sum_val = p / 2.0 # a+b
+                delta = sum_val**2 - 4*prod
+                if delta >= 0:
+                    a = (sum_val + math.sqrt(delta))/2
+                    b = (sum_val - math.sqrt(delta))/2
+                    return {'a':a, 'b':b, 'c':a, 'd':b}
+        return None
+    net.add_constraint(Constraint(name="para_solve_system", nodes=['perimeter','area','A','a','b'], flex_func=para_solve_system))
 
     return net
 
-# --- 4. HÌNH THOI ---
-def create_rhombus_network() -> ConstraintNetwork:
-    net = create_parallelogram_network()
-    # Tất cả cạnh bằng nhau (a=b=c=d)
-    def rhombus_sides(netw, known, unknown):
-        res = {}
-        val = None
-        for k in ['a','b','c','d']:
-            if k in known:
-                val = netw.vars[k].value
-                break
-        if val is not None:
-            for k in ['a','b','c','d']:
-                if k not in known:
-                    res[k] = val
-        return res
-    net.add_constraint(Constraint(name="rhombus_equal_sides", nodes=['a','b','c','d'], flex_func=rhombus_sides))
-    # Diện tích qua đường chéo: S = 0.5 * d1 * d2
-    net.add_constraint(Constraint(
-        name="rhombus_area_diags",
-        nodes=['area', 'd1', 'd2'],
-        forward_func=lambda v: 0.5 * v['d1'] * v['d2'],
-        target='area'
-    ))
-    # Quan hệ cạnh và đường chéo: (d1/2)^2 + (d2/2)^2 = a^2
-    def rhombus_side_diag(netw, known, unknown):
-        res = {}
-        if 'd1' in known and 'd2' in known:
-            val = safe_sqrt((netw.vars['d1'].value/2)**2 + (netw.vars['d2'].value/2)**2)
-            for k in ['a','b','c','d']:
-                if k not in known:
-                    res[k] = val
-        return res
-    net.add_constraint(Constraint(name="rhombus_pythagoras", nodes=['a','b','c','d','d1','d2'], flex_func=rhombus_side_diag))
-    # Perimeter -> side for rhombus: a = p / 4
-    net.add_constraint(Constraint(
-        name="rhombus_perimeter_to_side",
-        nodes=['perimeter', 'a', 'b', 'c', 'd'],
-        forward_func=lambda v: (v['perimeter'] / 4.0) if (v.get('perimeter') is not None) else None,
-        dependencies=['perimeter'],
-        target='a',
-        description="Compute side a = perimeter/4 for rhombus (then rhombus_equal_sides copies to others)"
-    ))
-
-    # ADD: nếu biết perimeter + area -> a = p/4, suy sin(A) = area / a^2 -> đặt góc A (và C)
-    def rhombus_perimeter_area_to_angle(netw, known, unknown):
-        if 'perimeter' in known and 'area' in known:
-            p = netw.vars['perimeter'].value
-            area = netw.vars['area'].value
-            if p is None or area is None: return None
-            a = p / 4.0
-            if a <= 0: return None
-            sinA = area / (a*a)
-            if sinA < -1.0 - 1e-12 or sinA > 1.0 + 1e-12:
-                return None
-            sinA = max(-1.0, min(1.0, sinA))
-            Adeg = math.degrees(math.asin(sinA))
-            # choose acute principal; C = 180 - A (opposite)
-            res = {}
-            if not netw.vars['a'].is_known(): res['a'] = a
-            # set angles if not set
-            if not netw.vars['A'].is_known(): res['A'] = Adeg
-            if not netw.vars['C'].is_known(): res['C'] = 180.0 - Adeg
-            # mirror sides via existing rhombus_equal_sides constraint
-            return res or None
-    net.add_constraint(Constraint(
-        name="rhombus_perimeter_area_to_angle",
-        nodes=['perimeter','area','a','A','C'],
-        flex_func=rhombus_perimeter_area_to_angle,
-        description="From perimeter+area compute side and angle for rhombus"
-    ))
-
-    return net
-
-# --- 5. HÌNH CHỮ NHẬT ---
+# =============================================================================
+# 5. HÌNH CHỮ NHẬT (RECTANGLE) - ĐÃ SỬA LỖI & BỔ SUNG
+# =============================================================================
 def create_rectangle_network() -> ConstraintNetwork:
     net = create_parallelogram_network()
-    # Góc vuông 90 độ (cố định)
-    def rect_force_90(netw, known, unknown):
+
+    # 1. Góc vuông 90 độ (Cố định)
+    def rect_90(netw, known, unknown):
+        return {k: 90.0 for k in ['A','B','C','D'] if k not in known}
+    net.add_constraint(Constraint(name="rect_90", nodes=['A','B','C','D'], flex_func=rect_90))
+
+    # 2. [QUAN TRỌNG] Liên kết Chiều cao h với Cạnh b
+    # Trong HCN, chiều cao ứng với đáy a chính là cạnh b.
+    # Điều này giúp các công thức diện tích cũ (S = a*h) tự động hiểu là S = a*b.
+    def rect_h_is_b(netw, known, unknown):
         res = {}
-        for ang in ['A', 'B', 'C', 'D']:
-            if ang not in known:
-                res[ang] = 90.0
+        if 'b' in known and 'h' not in known: res['h'] = netw.vars['b'].value
+        if 'h' in known and 'b' not in known: res['b'] = netw.vars['h'].value
         return res
-    net.add_constraint(Constraint(name="rect_angles_90", nodes=['A','B','C','D'], flex_func=rect_force_90))
-    # Đường chéo bằng nhau: d1 = d2 = sqrt(a^2 + b^2)
+    net.add_constraint(Constraint(name="rect_h_equals_b", nodes=['h', 'b'], flex_func=rect_h_is_b))
+
+    # 3. Đường chéo bằng nhau & Pytago (2 chiều)
+    def rect_pytago_flex(netw, known, unknown):
+        res = {}
+        # Xuôi: a,b -> d1
+        if 'a' in known and 'b' in known and 'd1' not in known:
+            res['d1'] = safe_sqrt(netw.vars['a'].value**2 + netw.vars['b'].value**2)
+        # Ngược: d1, a -> b
+        elif 'd1' in known and 'a' in known and 'b' not in known:
+            val = netw.vars['d1'].value**2 - netw.vars['a'].value**2
+            if val > 0: res['b'] = math.sqrt(val)
+        # Ngược: d1, b -> a
+        elif 'd1' in known and 'b' in known and 'a' not in known:
+            val = netw.vars['d1'].value**2 - netw.vars['b'].value**2
+            if val > 0: res['a'] = math.sqrt(val)
+        return res
+    net.add_constraint(Constraint(name="rect_pytago_flex", nodes=['a','b','d1'], flex_func=rect_pytago_flex))
+    
+    # Đồng bộ d1 = d2
     net.add_constraint(Constraint(
-        name="rect_diag_equal",
-        nodes=['d1', 'd2'],
-        flex_func=lambda n, k, u: {'d2': n.vars['d1'].value} if 'd1' in k else ({'d1': n.vars['d2'].value} if 'd2' in k else None)
-    ))
+        name="rect_diag_equal", nodes=['d1','d2'],
+        flex_func=lambda n,k,u: {'d2': n.vars['d1'].value} if 'd1' in k else ({'d1': n.vars['d2'].value} if 'd2' in k else None)))
+
+    # 4. [FIXED] Ràng buộc Diện tích Đa năng (Unified Area Constraint)
+    # Gom cả tính xuôi (S=ab) và tính ngược (a=S/b, b=S/a) vào một chỗ để đảm bảo luôn chạy.
+    def rect_area_unified(netw, known, unknown):
+        res = {}
+        # Tính xuôi: Có a, b -> Tính Area
+        if 'a' in known and 'b' in known and 'area' not in known:
+            res['area'] = netw.vars['a'].value * netw.vars['b'].value
+        
+        # Tính ngược: Có Area -> Tính cạnh còn lại
+        elif 'area' in known:
+            s = netw.vars['area'].value
+            if s is not None and s > 0:
+                # Có a -> Tính b
+                if 'a' in known and 'b' not in known:
+                    a_val = netw.vars['a'].value
+                    if a_val > 1e-9: res['b'] = s / a_val
+                # Có b -> Tính a
+                elif 'b' in known and 'a' not in known:
+                    b_val = netw.vars['b'].value
+                    if b_val > 1e-9: res['a'] = s / b_val
+        return res
+    
     net.add_constraint(Constraint(
-        name="rect_pythagoras",
-        nodes=['a', 'b', 'd1'],
-        forward_func=lambda v: safe_sqrt(v['a']**2 + v['b']**2),
-        target='d1'
-    ))
-    net.add_constraint(Constraint(
-        name="rect_area_simple",
-        nodes=['area', 'a', 'b'],
-        forward_func=lambda v: v['a'] * v['b'],
-        target='area'
-    ))
-    # Reverse area -> compute missing side: if area and a known -> b = area / a
-    net.add_constraint(Constraint(
-        name="rect_area_compute_b",
-        nodes=['area', 'a', 'b'],
-        forward_func=lambda v: (v['area'] / v['a']) if (v['a'] is not None and v['a'] != 0 and v['area'] is not None) else None,
-        dependencies=['area', 'a'],
-        target='b',
-        description="Compute b from area and a"
-    ))
-    # Reverse area -> compute missing side: if area and b known -> a = area / b
-    net.add_constraint(Constraint(
-        name="rect_area_compute_a",
-        nodes=['area', 'a', 'b'],
-        forward_func=lambda v: (v['area'] / v['b']) if (v['b'] is not None and v['b'] != 0 and v['area'] is not None) else None,
-        dependencies=['area', 'b'],
-        target='a',
-        description="Compute a from area and b"
+        name="rect_area_unified", 
+        nodes=['area', 'a', 'b'], 
+        flex_func=rect_area_unified,
+        description="S = a * b (hai chiều)"
     ))
 
-    # ADD: giải hệ a + b = p/2 và a*b = area để suy a,b (nếu biết perimeter & area)
-    def rect_perimeter_area_solve(netw, known, unknown):
-        if 'perimeter' in known and 'area' in known:
+    # 5. [MỚI] Giải hệ phương trình: Biết Chu vi (P) và Diện tích (S) -> Tìm a, b
+    # Hệ: 2(a+b) = P  và  a*b = S
+    # -> a, b là nghiệm của phương trình: X^2 - (P/2)X + S = 0
+    def rect_solve_P_S(netw, known, unknown):
+        # Chỉ chạy khi biết P và S, nhưng chưa biết a và b
+        if 'perimeter' in known and 'area' in known and not (netw.vars['a'].is_known() or netw.vars['b'].is_known()):
             p = netw.vars['perimeter'].value
-            area = netw.vars['area'].value
-            if p is None or area is None: return None
-            s = p / 2.0
-            disc = s*s - 4.0*area
-            if disc < -1e-9:
-                return None
-            disc = max(disc, 0.0)
-            r = math.sqrt(disc)
-            # two possible a roots
-            a1 = (s + r)/2.0
-            a2 = (s - r)/2.0
-            candidates = [x for x in (a1, a2) if x > 1e-12]
-            if not candidates:
-                return None
-            res = {}
-            # if one side known, compute the other
-            if netw.vars['a'].is_known() and not netw.vars['b'].is_known():
-                b_val = s - netw.vars['a'].value
-                if b_val > 0 and abs(netw.vars['a'].value * b_val - area) < 1e-6:
-                    res['b'] = b_val
-            elif netw.vars['b'].is_known() and not netw.vars['a'].is_known():
-                a_val = s - netw.vars['b'].value
-                if a_val > 0 and abs(a_val * netw.vars['b'].value - area) < 1e-6:
-                    res['a'] = a_val
-            elif not netw.vars['a'].is_known() and not netw.vars['b'].is_known():
-                a_val = min(candidates)
-                b_val = s - a_val
-                if b_val > 0:
-                    res['a'] = a_val
-                    res['b'] = b_val
-            # mirror to c,d (rectangle)
-            if 'a' in res and not netw.vars['c'].is_known(): res['c'] = res['a']
-            if 'b' in res and not netw.vars['d'].is_known(): res['d'] = res['b']
-            return res or None
-    net.add_constraint(Constraint(
-        name="rect_perimeter_area_solve",
-        nodes=['perimeter','area','a','b','c','d'],
-        flex_func=rect_perimeter_area_solve,
-        description="From perimeter+area compute rectangle sides solving quadratic"
-    ))
+            s = netw.vars['area'].value
+            
+            if p is not None and s is not None:
+                half_p = p / 2.0 # Tổng hai cạnh (a+b)
+                delta = half_p**2 - 4*s # Delta = (a+b)^2 - 4ab = (a-b)^2
+                
+                if delta >= -1e-9: # Delta không âm
+                    delta = max(0.0, delta)
+                    sqrt_delta = math.sqrt(delta)
+                    
+                    # Hai nghiệm
+                    x1 = (half_p + sqrt_delta) / 2.0
+                    x2 = (half_p - sqrt_delta) / 2.0
+                    
+                    if x1 > 0 and x2 > 0:
+                        # Gán a là cạnh dài, b là cạnh ngắn (hoặc ngược lại, không quan trọng)
+                        return {'a': x1, 'b': x2, 'c': x1, 'd': x2}
+        return None
 
-    # ALSO ensure square's perimeter forward exists (square built on rectangle)
     net.add_constraint(Constraint(
-        name="square_perimeter_to_side_forward",
-        nodes=['perimeter','a'],
-        forward_func=lambda v: (v['perimeter'] / 4.0) if (v.get('perimeter') is not None and v['perimeter']>0) else None,
-        dependencies=['perimeter'],
-        target='a',
-        description="Square: a = perimeter/4"
+        name="rect_solve_P_S",
+        nodes=['perimeter', 'area', 'a', 'b', 'c', 'd'],
+        flex_func=rect_solve_P_S,
+        description="Giải hệ P và S để tìm cạnh"
     ))
 
     return net
-
+# =============================================================================
+# 6. HÌNH VUÔNG (SQUARE) - ĐÃ CẬP NHẬT ĐẦY ĐỦ
+# =============================================================================
 def create_square_network() -> ConstraintNetwork:
-    """
-    Square network built on rectangle network:
-    - inherit rectangle constraints (right angles, diag, area)
-    - enforce a = b = c = d (flex)
-    - area = a^2 (forward)
-    - diagonal = a * sqrt(2) (forward)
-    """
     net = create_rectangle_network()
 
-    # Flex constraint: copy any known side to all others
-    def square_sides_equal(netw, known, unknown):
-        res = {}
+    # 1. Cạnh bằng nhau
+    def sq_sides(netw, known, unknown):
         val = None
-        # find a known side value
-        for k in ['a', 'b', 'c', 'd']:
-            if k in known:
-                val = netw.vars[k].value
-                break
-        if val is not None:
-            for k in ['a', 'b', 'c', 'd']:
-                if k not in known:
-                    res[k] = val
-        return res or None
+        for k in ['a','b','c','d']:
+            if k in known: val = netw.vars[k].value; break
+        if val: return {k: val for k in ['a','b','c','d'] if k not in known}
+        return None
+    net.add_constraint(Constraint(name="sq_sides", nodes=['a','b','c','d'], flex_func=sq_sides))
 
+    # 2. [RIÊNG HÌNH VUÔNG] Tính cạnh từ CHU VI: a = P/4
     net.add_constraint(Constraint(
-        name="square_sides_equal",
-        nodes=['a', 'b', 'c', 'd'],
-        flex_func=square_sides_equal,
-        description="Enforce all sides equal for square"
-    ))
+        name="sq_side_from_P", nodes=['perimeter','a'],
+        forward_func=lambda v: v['perimeter']/4.0 if v.get('perimeter') else None,
+        dependencies=['perimeter'], target='a', description="a = P/4"))
 
-    # area = a^2
+    # 3. [RIÊNG HÌNH VUÔNG] Tính cạnh từ DIỆN TÍCH: a = sqrt(S)
     net.add_constraint(Constraint(
-        name="square_area",
-        nodes=['area', 'a'],
-        forward_func=lambda v: (v['a']**2) if (v.get('a') is not None) else None,
-        dependencies=['a'],
-        target='area',
-        description="Square area = a^2"
-    ))
+        name="sq_side_from_S", nodes=['area','a'],
+        forward_func=lambda v: safe_sqrt(v['area']) if v.get('area') is not None else None,
+        dependencies=['area'], target='a', description="a = sqrt(S)"))
 
-    # diagonal d1 = a * sqrt(2)
+    # 4. Chéo a -> d
     net.add_constraint(Constraint(
-        name="square_diag",
-        nodes=['d1', 'a'],
-        forward_func=lambda v: (v['a'] * math.sqrt(2.0)) if (v.get('a') is not None) else None,
-        dependencies=['a'],
-        target='d1',
-        description="Square diagonal = a * sqrt(2)"
-    ))
+        name="sq_diag", nodes=['a','d1'],
+        forward_func=lambda v: v['a']*math.sqrt(2) if v.get('a') else None,
+        dependencies=['a'], target='d1'))
 
     return net
-
 def create_equilateral_triangle_network() -> ConstraintNetwork:
     """
     Equilateral triangle network:
@@ -1170,6 +1019,92 @@ def create_equilateral_triangle_network() -> ConstraintNetwork:
         dependencies=['a'],
         target='perimeter',
         description="Perimeter for equilateral triangle"
+    ))
+
+    # --- [MỚI] Tính cạnh từ CHU VI: a = P / 3 ---
+    net.add_constraint(Constraint(
+        name="eq_side_from_perimeter",
+        nodes=['perimeter','a'],
+        forward_func=lambda v: (v['perimeter'] / 3.0) if (v.get('perimeter') is not None) else None,
+        dependencies=['perimeter'],
+        target='a',
+        description="a = P/3 for equilateral"
+    ))
+
+    # --- [MỚI] Tính cạnh từ DIỆN TÍCH: a = sqrt(4S / sqrt(3)) ---
+    net.add_constraint(Constraint(
+        name="eq_side_from_area",
+        nodes=['area','a'],
+        forward_func=lambda v: safe_sqrt(v['area'] * 4.0 / math.sqrt(3)) if (v.get('area') is not None) else None,
+        dependencies=['area'],
+        target='a',
+        description="a = sqrt(4S/sqrt(3)) for equilateral"
+    ))
+
+    return net
+def create_rhombus_network() -> ConstraintNetwork:
+    """
+    Rhombus network (đảm bảo hàm tồn tại để GUI gọi):
+    - kế thừa từ parallelogram
+    - tất cả các cạnh bằng nhau (flex)
+    - diện tích có thể từ d1,d2: area = 0.5 * d1 * d2
+    - quan hệ cạnh-đường chéo: (d1/2)^2 + (d2/2)^2 = a^2
+    - perimeter -> a (a = perimeter/4)
+    """
+    net = create_parallelogram_network()
+
+    # 1) Tất cả cạnh bằng nhau (flex)
+    def rhombus_sides(netw, known, unknown):
+        res = {}
+        val = None
+        for k in ('a','b','c','d'):
+            if k in known:
+                val = netw.vars[k].value
+                break
+        if val is not None:
+            for k in ('a','b','c','d'):
+                if k not in known:
+                    res[k] = val
+        return res or None
+    net.add_constraint(Constraint(name="rhombus_equal_sides", nodes=['a','b','c','d'], flex_func=rhombus_sides,
+                                  description="All sides equal for rhombus"))
+
+    # 2) Area from diagonals
+    net.add_constraint(Constraint(
+        name="rhombus_area_diags",
+        nodes=['area','d1','d2'],
+        forward_func=lambda v: 0.5 * v['d1'] * v['d2'] if (v.get('d1') is not None and v.get('d2') is not None) else None,
+        dependencies=['d1','d2'],
+        target='area',
+        description="Area = 0.5 * d1 * d2"
+    ))
+
+    # 3) Relationship between sides and diagonals: (d1/2)^2 + (d2/2)^2 = a^2
+    def rhombus_side_from_diags(netw, known, unknown):
+        # if both diagonals known, compute side
+        if 'd1' in known and 'd2' in known:
+            d1 = netw.vars['d1'].value
+            d2 = netw.vars['d2'].value
+            val = safe_sqrt((d1/2.0)**2 + (d2/2.0)**2)
+            if val is None:
+                return None
+            res = {}
+            for k in ('a','b','c','d'):
+                if k not in known:
+                    res[k] = val
+            return res or None
+        return None
+    net.add_constraint(Constraint(name="rhombus_side_from_diags", nodes=['a','b','c','d','d1','d2'], flex_func=rhombus_side_from_diags,
+                                  description="Compute side from diagonals for rhombus"))
+
+    # 4) Perimeter -> side (forward)
+    net.add_constraint(Constraint(
+        name="rhombus_perimeter_to_side",
+        nodes=['perimeter','a','b','c','d'],
+        forward_func=lambda v: (v['perimeter'] / 4.0) if (v.get('perimeter') is not None) else None,
+        dependencies=['perimeter'],
+        target='a',
+        description="a = perimeter / 4 for rhombus"
     ))
 
     return net

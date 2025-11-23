@@ -706,32 +706,47 @@ class GeometryCalculatorGUI:
         # Vẽ tứ giác
         quad = plt.Polygon([A_coord, B_coord, C_coord, D_coord], fill=False, edgecolor='blue', linewidth=2)
         self.ax.add_patch(quad)
-        # Label vertices
+        
+        # Label vertices (Đỉnh)
         for coord, label in [(A_coord, 'A'), (B_coord, 'B'), (C_coord, 'C'), (D_coord, 'D')]:
             self.ax.plot(*coord, 'ro', markersize=8)
-            offset_x = -0.1 if coord[0] < 0.1 else 0.1
-            offset_y = -0.1 if coord[1] < 0.1 else 0.1
+            # Tinh chỉnh vị trí nhãn đỉnh để không đè vào hình
+            offset_x = -0.15 if coord[0] < (a or 0)/2 else 0.15
+            offset_y = -0.15 if coord[1] < (b or d or 0)/2 else 0.15
             self.ax.text(coord[0] + offset_x, coord[1] + offset_y, label, 
                         ha='center', va='center', fontsize=12, fontweight='bold')
-        # Label sides if available
+
+        # --- [SỬA LỖI HIỂN THỊ CẠNH] ---
+        # Quy ước chuẩn vòng tròn: a=AB, b=BC, c=CD, d=DA
+        # Như vậy a sẽ đối diện c, và b sẽ đối diện d.
+        
+        # Cạnh a (AB) - Đáy dưới
         if a is not None:
             mid_ab = ((A_coord[0] + B_coord[0])/2, (A_coord[1] + B_coord[1])/2)
-            self.ax.text(mid_ab[0], mid_ab[1] - 0.1, f'a={a:.2f}', ha='center', va='top', fontsize=10)
+            self.ax.text(mid_ab[0], mid_ab[1] - 0.2, f'a={a:.2f}', ha='center', va='top', fontsize=10)
+            
+        # Cạnh b (BC) - Bên phải
         if b is not None:
-            mid_ad = ((A_coord[0] + D_coord[0])/2, (A_coord[1] + D_coord[1])/2)
-            self.ax.text(mid_ad[0] - 0.1, mid_ad[1], f'b={b:.2f}', ha='right', va='center', fontsize=10)
-        if c is not None:
             mid_bc = ((B_coord[0] + C_coord[0])/2, (B_coord[1] + C_coord[1])/2)
-            self.ax.text(mid_bc[0], mid_bc[1] + 0.1, f'c={c:.2f}', ha='center', va='bottom', fontsize=10)
-        if d is not None:
+            self.ax.text(mid_bc[0] + 0.1, mid_bc[1], f'b={b:.2f}', ha='left', va='center', fontsize=10)
+            
+        # Cạnh c (CD) - Đáy trên (Đối diện a)
+        if c is not None:
             mid_cd = ((C_coord[0] + D_coord[0])/2, (C_coord[1] + D_coord[1])/2)
-            self.ax.text(mid_cd[0] + 0.1, mid_cd[1], f'd={d:.2f}', ha='left', va='center', fontsize=10)
-        # Set limits
-        all_x = [A_coord[0], B_coord[0], C_coord[0], D_coord[0]]
-        all_y = [A_coord[1], B_coord[1], C_coord[1], D_coord[1]]
-        self.ax.set_xlim(min(all_x) - 0.5, max(all_x) + 0.5)
-        self.ax.set_ylim(min(all_y) - 0.5, max(all_y) + 0.5)
-        self.ax.set_title('Tứ giác', fontsize=14, fontweight='bold')
+            self.ax.text(mid_cd[0], mid_cd[1] + 0.1, f'c={c:.2f}', ha='center', va='bottom', fontsize=10)
+            
+        # Cạnh d (DA) - Bên trái (Đối diện b)
+        if d is not None:
+            mid_da = ((D_coord[0] + A_coord[0])/2, (D_coord[1] + A_coord[1])/2)
+            self.ax.text(mid_da[0] - 0.1, mid_da[1], f'd={d:.2f}', ha='right', va='center', fontsize=10)
+
+        # Set limits (Căn chỉnh khung hình)
+        all_x = [p[0] for p in [A_coord, B_coord, C_coord, D_coord]]
+        all_y = [p[1] for p in [A_coord, B_coord, C_coord, D_coord]]
+        margin = 1.0
+        self.ax.set_xlim(min(all_x) - margin, max(all_x) + margin)
+        self.ax.set_ylim(min(all_y) - margin, max(all_y) + margin)
+        self.ax.set_title('Tứ giác', fontsize=14, fontweight='bold', pad=20)
     
     def detect_ssa_cases(self, assigned: Dict[str, float]) -> list:
         """
