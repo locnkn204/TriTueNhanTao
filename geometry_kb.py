@@ -454,6 +454,44 @@ def create_triangle_network() -> ConstraintNetwork:
         description="If A=B=C=60 and perimeter known -> a=b=c=p/3 and area."
     ))
 
+    # [NEW] Reverse height: compute area from height and base
+    def triangle_area_from_height_base(netw, known, unknown):
+        res = {}
+        if 'area' in unknown:
+            # area = 0.5 * base * height
+            for base, height in [('a', 'h_a'), ('b', 'h_b'), ('c', 'h_c')]:
+                if base in known and height in known:
+                    res['area'] = 0.5 * netw.vars[base].value * netw.vars[height].value
+                    break
+        return res or None
+    
+    net.add_constraint(Constraint(
+        name="triangle_area_from_height_base",
+        nodes=['a','b','c','area','h_a','h_b','h_c'],
+        flex_func=triangle_area_from_height_base,
+        description="Area from base and height"
+    ))
+
+    # [NEW] Reverse height: compute base from area and height
+    def triangle_base_from_area_height(netw, known, unknown):
+        res = {}
+        if 'area' in known:
+            area_val = netw.vars['area'].value
+            if area_val > 0:
+                for base, height in [('a', 'h_a'), ('b', 'h_b'), ('c', 'h_c')]:
+                    if base in unknown and height in known:
+                        h = netw.vars[height].value
+                        if h > 0:
+                            res[base] = 2 * area_val / h
+        return res or None
+    
+    net.add_constraint(Constraint(
+        name="triangle_base_from_area_height",
+        nodes=['a','b','c','area','h_a','h_b','h_c'],
+        flex_func=triangle_base_from_area_height,
+        description="Compute base from area and height"
+    ))
+
     return net
 
 # --- CÁC HÀM BỔ TRỢ ---
@@ -633,6 +671,34 @@ def create_quadrilateral_network() -> ConstraintNetwork:
         name="quad_height_from_area",
         nodes=['a','c','h','area'],
         flex_func=quad_height_from_area
+    ))
+
+    # [NEW] Diagonal computation from sides using Bretschneider
+    def quad_diagonal_from_sides(netw, known, unknown):
+        res = {}
+        # d1^2 = a^2 + b^2 - 2ab*cos(B)
+        if 'd1' in unknown and all(k in known for k in ['a', 'b', 'B']):
+            a, b = netw.vars['a'].value, netw.vars['b'].value
+            B = netw.vars['B'].value
+            val = a**2 + b**2 - 2*a*b*math.cos(math.radians(B))
+            if val >= 0:
+                res['d1'] = safe_sqrt(val)
+        
+        # d2^2 = a^2 + d^2 - 2ad*cos(A)
+        if 'd2' in unknown and all(k in known for k in ['a', 'd', 'A']):
+            a, d = netw.vars['a'].value, netw.vars['d'].value
+            A = netw.vars['A'].value
+            val = a**2 + d**2 - 2*a*d*math.cos(math.radians(A))
+            if val >= 0:
+                res['d2'] = safe_sqrt(val)
+        
+        return res or None
+    
+    net.add_constraint(Constraint(
+        name="quad_diagonal_from_sides",
+        nodes=['a','b','c','d','A','B','C','D','d1','d2'],
+        flex_func=quad_diagonal_from_sides,
+        description="Compute diagonals from sides and angles"
     ))
 
     return net
@@ -862,29 +928,31 @@ def create_rectangle_network() -> ConstraintNetwork:
     # Gom cả tính xuôi (S=ab) và tính ngược (a=S/b, b=S/a) vào một chỗ để đảm bảo luôn chạy.
     def rect_area_unified(netw, known, unknown):
         res = {}
-        # Tính xuôi: Có a, b -> Tính Area
+        # Forward: a, b -> area
         if 'a' in known and 'b' in known and 'area' not in known:
             res['area'] = netw.vars['a'].value * netw.vars['b'].value
         
-        # Tính ngược: Có Area -> Tính cạnh còn lại
+        # Reverse: area -> side
         elif 'area' in known:
             s = netw.vars['area'].value
             if s is not None and s > 0:
-                # Có a -> Tính b
                 if 'a' in known and 'b' not in known:
                     a_val = netw.vars['a'].value
-                    if a_val > 1e-9: res['b'] = s / a_val
-                # Có b -> Tính a
+                    if a_val > 1e-9: 
+                        res['b'] = s / a_val
+                        res['d'] = s / a_val  # b = d in rectangle
                 elif 'b' in known and 'a' not in known:
                     b_val = netw.vars['b'].value
-                    if b_val > 1e-9: res['a'] = s / b_val
-        return res
+                    if b_val > 1e-9: 
+                        res['a'] = s / b_val
+                        res['c'] = s / b_val  # a = c in rectangle
+        return res or None
     
     net.add_constraint(Constraint(
         name="rect_area_unified", 
-        nodes=['area', 'a', 'b'], 
+        nodes=['area', 'a', 'b', 'c', 'd'], 
         flex_func=rect_area_unified,
-        description="S = a * b (hai chiều)"
+        description="Bidirectional area = a * b"
     ))
 
     # 5. [MỚI] Giải hệ phương trình: Biết Chu vi (P) và Diện tích (S) -> Tìm a, b

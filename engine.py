@@ -4,53 +4,74 @@ import matplotlib.pyplot as plt
 from typing import Callable, Dict, List, Optional, Any, Tuple
 
 EPSILON = 1e-9
-DEFAULT_ANGLE_TOL = 0.1  # degrees tolerance for 90°
+DEFAULT_ANGLE_TOL = 0.1
 
 def safe_sqrt(x: float) -> Optional[float]:
+    """Safe square root with tolerance for numerical errors"""
     if x is None:
         return None
-    if x < 0 and x > -1e-12:
-        x = 0.0
-    if x < 0:
+    try:
+        if x < 0:
+            if x > -1e-12:  # Tolerance for numerical errors
+                x = 0.0
+            else:
+                return None
+        return math.sqrt(x)
+    except (ValueError, TypeError):
         return None
-    return math.sqrt(x)
 
 def clamp(x: float, lo: float = -1.0, hi: float = 1.0) -> float:
-    return max(lo, min(hi, x))
+    """Clamp value to range [lo, hi] with error handling"""
+    try:
+        return max(lo, min(hi, float(x)))
+    except (TypeError, ValueError):
+        return lo
 
 class Var:
     def __init__(self, name: str, description: str = ""):
         self.name = name
         self.description = description
         self.value: Optional[float] = None
-        self.source: Optional[str] = None  # provenance: 'user' or constraint name
+        self.source: Optional[str] = None
         self.constraints: List['Constraint'] = []
 
     def is_known(self) -> bool:
         return self.value is not None
 
     def set(self, v: Optional[float], source: Optional[str] = None) -> bool:
-        """Set value with provenance. Returns True if value changed (beyond EPSILON)."""
+        """Set value with provenance. Returns True if value changed."""
         if v is None:
             return False
+        
         try:
             v = float(v)
+        except (TypeError, ValueError):
+            return False
+        
+        # Validation with better error handling
+        try:
+            if self.name in ('A', 'B', 'C'):  # Triangle angles
+                if v <= 0 or v >= 180:
+                    raise ValueError(f"Triangle angle {self.name} must be in (0, 180)")
+            elif self.name == 'D':  # Quadrilateral angle
+                if v <= 0 or v >= 360:
+                    raise ValueError(f"Quadrilateral angle {self.name} must be in (0, 360)")
+                v = v % 360.0
+            
+            # Validation for sides and other geometric values
+            if self.name in ('a', 'b', 'c', 'd', 'perimeter', 'area', 'h', 'h_a', 'h_b', 'h_c', 'h_d', 'r', 'R'):
+                if v < 0:
+                    raise ValueError(f"{self.name} must be non-negative")
+        except ValueError:
+            raise  # Re-raise validation errors
         except Exception:
             return False
-        # Validation trước khi normalize
-        if self.name in ('A', 'B', 'C'):  # Triangle angles
-            if v <= 0 or v >= 180:
-                raise ValueError(f"Triangle angle {self.name} must be in (0, 180)")
-            # Không cần chuẩn hóa góc tam giác
-        elif self.name == 'D':  # Quadrilateral angle
-            if v <= 0 or v >= 360:
-                raise ValueError(f"Quadrilateral angle {self.name} must be in (0, 360)")
-            v = v % 360.0  # Chỉ chuẩn hóa góc tứ giác
+        
         if self.value is None or abs(self.value - v) > EPSILON:
             self.value = v
             self.source = source
             return True
-        # if same within EPSILON, still update source if previously None
+        
         if self.source is None and source is not None:
             self.source = source
         return False
@@ -81,7 +102,9 @@ class Constraint:
         self.description = description
 
     def try_apply(self, net: 'ConstraintNetwork') -> Dict[str, float]:
+        """Try to apply constraint and return updates. Enhanced error handling."""
         updates: Dict[str, float] = {}
+        
         # Flex function path: allow computing multiple unknowns
         if self.flex_func:
             known = [n for n in self.nodes if net.vars[n].is_known()]
@@ -93,11 +116,24 @@ class Constraint:
                 if isinstance(res, dict):
                     for k, v in res.items():
                         if k in net.vars and v is not None:
-                            updates[k] = float(v)
+                            try:
+                                updates[k] = float(v)
+                            except (TypeError, ValueError):
+                                if net.debug:
+                                    net.log(f"[Constraint {self.name}] Invalid value for {k}: {v}")
+                                continue
                 return updates
-            except Exception:
+            except ZeroDivisionError:
                 if net.debug:
-                    net.log(f"[Constraint {self.name}] flex_func exception")
+                    net.log(f"[Constraint {self.name}] Division by zero")
+                return {}
+            except (ValueError, TypeError) as e:
+                if net.debug:
+                    net.log(f"[Constraint {self.name}] Math error: {e}")
+                return {}
+            except Exception as e:
+                if net.debug:
+                    net.log(f"[Constraint {self.name}] Unexpected error: {e}")
                 return {}
 
         # Forward path: single target, dependencies must be known
@@ -114,9 +150,17 @@ class Constraint:
                     return {}
                 res = float(res)
                 updates[self.target] = res
-            except Exception:
+            except ZeroDivisionError:
                 if net.debug:
-                    net.log(f"[Constraint {self.name}] forward_func exception with values={values}")
+                    net.log(f"[Constraint {self.name}] Division by zero with values={values}")
+                return {}
+            except (ValueError, TypeError) as e:
+                if net.debug:
+                    net.log(f"[Constraint {self.name}] Math error with values={values}: {e}")
+                return {}
+            except Exception as e:
+                if net.debug:
+                    net.log(f"[Constraint {self.name}] Unexpected error with values={values}: {e}")
                 return {}
         return updates
 
@@ -152,31 +196,23 @@ class ConstraintNetwork:
             self.graph.add_edge(constraint.name, n)
 
     def set_input(self, name: str, value: float, source: str = 'user', tolerance: float = 1e-2) -> Tuple[bool, str]:
-        """
-        Gán giá trị đầu vào với cơ chế kiểm tra tính nhất quán (Consistency Check).
-        Trả về: (Thành công: bool, Thông báo: str)
-        """
+        """Set input with consistency checking."""
         if name not in self.vars:
             self.add_variable(name)
         
         var = self.vars[name]
         
-        # 1. KIỂM TRA XUNG ĐỘT TRỰC TIẾP
-        # Nếu biến đã có giá trị (do máy tính đã tính ra từ trước), kiểm tra xem giá trị mới nhập có khớp không.
+        # Check direct conflict
         if var.is_known():
             current_val = var.value
-            # Nếu chênh lệch quá lớn -> Báo lỗi mâu thuẫn
             if abs(current_val - value) > tolerance:
-                return False, (f"Xung đột dữ liệu! Giá trị '{name}' bạn nhập ({value}) "
-                               f"mâu thuẫn với giá trị đã tính toán trước đó ({current_val:.4f}).\n"
-                               f"Chênh lệch: {abs(current_val - value):.4f}")
+                return False, (f"Xung đột! Giá trị '{name}' bạn nhập ({value}) "
+                               f"mâu thuẫn với giá trị đã tính ({current_val:.4f})")
             else:
-                # Nếu chênh lệch nhỏ (sai số làm tròn), cập nhật lại để giao diện hiện đúng số user nhập
                 var.set(value, source=source)
                 return True, "Updated (refinement)"
 
-        # 2. GÁN GIÁ TRỊ VÀ LAN TRUYỀN (PROPAGATE)
-        # Lưu trạng thái cũ để Rollback (hoàn tác) nếu phát hiện lỗi sau khi tính toán
+        # Save state for rollback
         prev_states = {n: (v.value, v.source) for n, v in self.vars.items()}
         
         changed = var.set(value, source=source)
@@ -184,56 +220,42 @@ class ConstraintNetwork:
             if self.debug:
                 self.log(f"Input set {name}={value} (source={source})")
             
-            # Kích hoạt lan truyền để tính ra các biến phụ thuộc
             self.propagate_from(name)
 
-            # 3. KIỂM TRA TỔNG QUÁT: CHU VI (PERIMETER CHECK)
-            # Logic này sửa lỗi "Dương tính giả" khi mạng lưới có biến thừa (như biến 'd' trong tam giác)
+            # Perimeter consistency check
             tol = 1e-4
             if 'perimeter' in self.vars and self.vars['perimeter'].is_known() and self.vars['perimeter'].source == 'user':
                 p = self.vars['perimeter'].value
 
-                # [FIX THÔNG MINH] Lọc danh sách cạnh: Chỉ lấy những cạnh THỰC SỰ liên kết với Chu vi
-                # Thay vì lấy tất cả a,b,c,d, ta quét xem biến perimeter dính dáng đến ai.
+                # Find relevant sides connected to perimeter
                 relevant_sides = set()
                 perimeter_var = self.vars['perimeter']
                 
-                # Quét tất cả các ràng buộc (constraints) dính vào biến perimeter
                 for cons in perimeter_var.constraints:
-                    # Nếu ràng buộc đó có chứa các biến cạnh a,b,c,d -> Đó là cạnh liên quan
                     for node in cons.nodes:
                         if node in ('a', 'b', 'c', 'd'):
                             relevant_sides.add(node)
                 
-                # Danh sách cạnh cần kiểm tra (Ví dụ Tam giác chỉ còn a,b,c. Biến d bị loại bỏ)
                 sides_in_net = list(relevant_sides)
-
-                # Tính tổng các cạnh ĐÃ BIẾT trong danh sách lọc
                 known_sides_vals = [self.vars[s].value for s in sides_in_net if self.vars[s].is_known()]
                 sum_known_sides = sum(known_sides_vals)
-
-                # Kiểm tra xem đã biết đủ hết các cạnh liên quan chưa
                 all_relevant_sides_known = (len(known_sides_vals) == len(sides_in_net))
 
                 if all_relevant_sides_known:
-                    # TRƯỜNG HỢP 1: Đã biết đủ cạnh -> Tổng phải BẰNG chu vi (cho phép sai số)
                     if abs(sum_known_sides - p) > tol:
-                        # Có lỗi -> Hoàn tác (Rollback)
+                        # Rollback
                         for n, (val, src) in prev_states.items():
                             self.vars[n].value = val
                             self.vars[n].source = src
-                        return False, (f"Mâu thuẫn toán học: Tổng các cạnh tính được ({sum_known_sides:.4f}) "
-                                       f"khác với Chu vi bạn nhập ({p}).")
+                        return False, (f"Mâu thuẫn: Tổng các cạnh ({sum_known_sides:.4f}) "
+                                       f"khác với Chu vi ({p})")
                 else:
-                    # TRƯỜNG HỢP 2: Chưa biết đủ cạnh -> Tổng hiện tại phải NHỎ HƠN chu vi
-                    # (Phải chừa chỗ cho cạnh chưa biết > 0)
                     if sum_known_sides >= p - tol:
-                        # Có lỗi -> Hoàn tác
+                        # Rollback
                         for n, (val, src) in prev_states.items():
                             self.vars[n].value = val
                             self.vars[n].source = src
-                        return False, (f"Giá trị không hợp lệ: Chu vi = {p} nhỏ hơn hoặc bằng tổng các cạnh đã biết ({sum_known_sides:.4f}). "
-                                       "Không còn dư địa cho cạnh còn thiếu.")
+                        return False, (f"Chu vi = {p} nhỏ hơn hoặc bằng tổng cạnh đã biết ({sum_known_sides:.4f})")
         
         return True, "Success"
 
@@ -249,10 +271,15 @@ class ConstraintNetwork:
             for cons in var.constraints:
                 updates = cons.try_apply(self)
                 for uname, uval in updates.items():
-                    if uname in self.vars and self.vars[uname].set(uval, source=cons.name):
-                        if self.debug:
-                            self.log(f"  {uname} = {uval:.6g} (from {cons.name})")
-                        queue.append(uname)
+                        if uname in self.vars:
+                            try:
+                                if self.vars[uname].set(uval, source=cons.name):
+                                    if self.debug:
+                                        self.log(f"  {uname} = {uval:.6g} (from {cons.name})")
+                                    queue.append(uname)
+                            except ValueError as e:
+                                # Re-raise to be caught by caller
+                                raise ValueError(f"Lỗi khi tính {uname}: {str(e)}")
             processed.add(cur)
 
     def solve(self, max_rounds: int = 100) -> Tuple[bool, Dict[str, Any]]:
@@ -279,9 +306,14 @@ class ConstraintNetwork:
             for cons in sorted(cons_to_run, key=lambda c: c.name):
                 updates = cons.try_apply(self)
                 for uname, uval in updates.items():
-                    if uname in self.vars and self.vars[uname].set(uval, source=cons.name):
-                        changed = True
-                        queue.append(uname)
+                        if uname in self.vars:
+                            try:
+                                if self.vars[uname].set(uval, source=cons.name):
+                                    changed = True
+                                    queue.append(uname)
+                            except ValueError as e:
+                                # Re-raise to be caught by GUI
+                                raise ValueError(f"Lỗi khi tính {uname}: {str(e)}")
             # next round
         converged = not changed
         diagnostics = {}
