@@ -176,14 +176,52 @@ class ConstraintNetwork:
                 var.set(value, source=source)
                 return True, "Updated (refinement)"
 
-        # 2. Nếu biến chưa biết, gán bình thường và lan truyền
+        # 2. Nếu biến chưa biết: lưu snapshot toàn bộ trạng thái, gán, propagate, rồi kiểm tra chu vi.
+        #    Nếu mâu thuẫn => rollback toàn bộ mạng và trả lỗi.
+        prev_states = {n: (v.value, v.source) for n, v in self.vars.items()}
         changed = var.set(value, source=source)
         if changed:
             if self.debug:
                 self.log(f"Input set {name}={value} (source={source})")
-            # Lan truyền ngay lập tức để phát hiện xung đột sớm cho các biến khác
+            # Lan truyền trước để mạng có cơ hội tính các cạnh còn lại
             self.propagate_from(name)
-            
+
+            # Kiểm tra nhanh tính hợp lệ của 'perimeter' SO SÁNH SAU KHI PROPAGATE
+            tol = 1e-4  # Nới lỏng dung sai một chút
+            if 'perimeter' in self.vars and self.vars['perimeter'].is_known() and self.vars['perimeter'].source == 'user':
+                p = self.vars['perimeter'].value
+
+                # Danh sách các biến cạnh có trong mạng lưới này
+                possible_sides = ['a', 'b', 'c', 'd']
+                sides_in_net = [s for s in possible_sides if s in self.vars]
+
+                # Tính tổng các cạnh ĐÃ BIẾT
+                known_sides_vals = [self.vars[s].value for s in sides_in_net if self.vars[s].is_known()]
+                sum_known_sides = sum(known_sides_vals)
+
+                # Kiểm tra xem đã biết hết tất cả các cạnh chưa
+                all_sides_known = (len(known_sides_vals) == len(sides_in_net))
+
+                if all_sides_known:
+                    # TRƯỜNG HỢP 1: Đã biết hết cạnh -> Tổng phải BẰNG chu vi (cho phép sai số nhỏ)
+                    if abs(sum_known_sides - p) > tol:
+                        # rollback
+                        for n, (val, src) in prev_states.items():
+                            self.vars[n].value = val
+                            self.vars[n].source = src
+                        return False, (f"Mâu thuẫn toán học: Tổng các cạnh tính được ({sum_known_sides:.4f}) "
+                                       f"khác với Chu vi bạn nhập ({p}).")
+                else:
+                    # TRƯỜNG HỢP 2: Chưa biết hết cạnh -> Tổng các cạnh đã biết phải NHỎ HƠN chu vi
+                    # (Phải chừa chỗ cho cạnh chưa biết > 0)
+                    if sum_known_sides >= p - tol:
+                        # rollback
+                        for n, (val, src) in prev_states.items():
+                            self.vars[n].value = val
+                            self.vars[n].source = src
+                        return False, (f"Giá trị không hợp lệ: Chu vi = {p} nhỏ hơn hoặc bằng tổng các cạnh đã biết ({sum_known_sides:.4f}). "
+                                       "Không còn dư địa cho các cạnh còn thiếu.")
+            # Nếu vừa gán hợp lệ và không mâu thuẫn, giữ trạng thái sau propagate
         return True, "Success"
 
     def propagate_from(self, start_name: str):

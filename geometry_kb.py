@@ -771,6 +771,40 @@ def create_parallelogram_network() -> ConstraintNetwork:
                 res['d1'] = safe_sqrt(sum_sq - netw.vars['d2'].value**2)
         return res
     net.add_constraint(Constraint(name="para_diag_law", nodes=['a','b','d1','d2'], flex_func=para_diagonals_law))
+    # FLEX: từ perimeter tính cạnh còn lại cho parallelogram (p = 2*(a+b))
+    def para_perimeter_flex(netw, known, unknown):
+        res = {}
+        if 'perimeter' not in known:
+            return None
+        p = netw.vars['perimeter'].value
+        if p is None:
+            return None
+        # nếu biết c hoặc d, đồng bộ về a/b nếu cần (a=c, b=d)
+        if netw.vars.get('c') and netw.vars['c'].is_known() and not netw.vars['a'].is_known():
+            res['a'] = netw.vars['c'].value
+        if netw.vars.get('d') and netw.vars['d'].is_known() and not netw.vars['b'].is_known():
+            res['b'] = netw.vars['d'].value
+        # nếu biết a, tính b = p/2 - a
+        if netw.vars['a'].is_known() and not netw.vars['b'].is_known():
+            b_val = p/2.0 - netw.vars['a'].value
+            if b_val > 0:
+                res['b'] = b_val
+                if not netw.vars['d'].is_known(): res['d'] = b_val
+                if not netw.vars['c'].is_known(): res['c'] = netw.vars['a'].value
+        # nếu biết b, tính a = p/2 - b
+        if netw.vars['b'].is_known() and not netw.vars['a'].is_known():
+            a_val = p/2.0 - netw.vars['b'].value
+            if a_val > 0:
+                res['a'] = a_val
+                if not netw.vars['c'].is_known(): res['c'] = a_val
+                if not netw.vars['d'].is_known(): res['d'] = netw.vars['b'].value
+        return res or None
+    net.add_constraint(Constraint(
+        name="para_perimeter_flex",
+        nodes=['perimeter','a','b','c','d'],
+        flex_func=para_perimeter_flex,
+        description="Flex: compute a/b (and mirror c/d) from perimeter for parallelogram"
+    ))
     return net
 
 # --- 4. HÌNH THOI ---
@@ -807,6 +841,15 @@ def create_rhombus_network() -> ConstraintNetwork:
                     res[k] = val
         return res
     net.add_constraint(Constraint(name="rhombus_pythagoras", nodes=['a','b','c','d','d1','d2'], flex_func=rhombus_side_diag))
+    # Perimeter -> side for rhombus: a = p / 4
+    net.add_constraint(Constraint(
+        name="rhombus_perimeter_to_side",
+        nodes=['perimeter', 'a', 'b', 'c', 'd'],
+        forward_func=lambda v: (v['perimeter'] / 4.0) if (v.get('perimeter') is not None) else None,
+        dependencies=['perimeter'],
+        target='a',
+        description="Compute side a = perimeter/4 for rhombus (then rhombus_equal_sides copies to others)"
+    ))
     return net
 
 # --- 5. HÌNH CHỮ NHẬT ---
@@ -838,39 +881,110 @@ def create_rectangle_network() -> ConstraintNetwork:
         forward_func=lambda v: v['a'] * v['b'],
         target='area'
     ))
+    # Reverse area -> compute missing side: if area and a known -> b = area / a
+    net.add_constraint(Constraint(
+        name="rect_area_compute_b",
+        nodes=['area', 'a', 'b'],
+        forward_func=lambda v: (v['area'] / v['a']) if (v['a'] is not None and v['a'] != 0 and v['area'] is not None) else None,
+        dependencies=['area', 'a'],
+        target='b',
+        description="Compute b from area and a"
+    ))
+    # Reverse area -> compute missing side: if area and b known -> a = area / b
+    net.add_constraint(Constraint(
+        name="rect_area_compute_a",
+        nodes=['area', 'a', 'b'],
+        forward_func=lambda v: (v['area'] / v['b']) if (v['b'] is not None and v['b'] != 0 and v['area'] is not None) else None,
+        dependencies=['area', 'b'],
+        target='a',
+        description="Compute a from area and b"
+    ))
+    # FLEX: từ perimeter tính cạnh còn lại cho rectangle (perimeter = 2*(a + b))
+    def rect_perimeter_flex(netw, known, unknown):
+        res = {}
+        if 'perimeter' not in known:
+            return None
+        p = netw.vars['perimeter'].value
+        if p is None:
+            return None
+        # đồng bộ các cạnh đối nếu có
+        if netw.vars.get('c') and netw.vars['c'].is_known() and not netw.vars['a'].is_known():
+            res['a'] = netw.vars['c'].value
+        if netw.vars.get('d') and netw.vars['d'].is_known() and not netw.vars['b'].is_known():
+            res['b'] = netw.vars['d'].value
+        # nếu biết a -> b = p/2 - a
+        if netw.vars['a'].is_known() and not netw.vars['b'].is_known():
+            b_val = p/2.0 - netw.vars['a'].value
+            if b_val > 0:
+                res['b'] = b_val
+                if not netw.vars['c'].is_known(): res['c'] = netw.vars['a'].value
+                if not netw.vars['d'].is_known(): res['d'] = b_val
+        # nếu biết b -> a = p/2 - b
+        if netw.vars['b'].is_known() and not netw.vars['a'].is_known():
+            a_val = p/2.0 - netw.vars['b'].value
+            if a_val > 0:
+                res['a'] = a_val
+                if not netw.vars['c'].is_known(): res['c'] = a_val
+                if not netw.vars['d'].is_known(): res['d'] = netw.vars['b'].value
+        return res or None
+    net.add_constraint(Constraint(
+        name="rect_perimeter_flex",
+        nodes=['perimeter','a','b','c','d'],
+        flex_func=rect_perimeter_flex,
+        description="Flex: compute a/b and mirror c/d from perimeter for rectangle"
+    ))
     return net
 
-# --- 6. HÌNH VUÔNG ---
 def create_square_network() -> ConstraintNetwork:
+    """
+    Square network built on rectangle network:
+    - inherit rectangle constraints (right angles, diag, area)
+    - enforce a = b = c = d (flex)
+    - area = a^2 (forward)
+    - diagonal = a * sqrt(2) (forward)
+    """
     net = create_rectangle_network()
-    # Cạnh a = b = c = d
+
+    # Flex constraint: copy any known side to all others
     def square_sides_equal(netw, known, unknown):
         res = {}
         val = None
-        for k in ['a','b','c','d']:
+        # find a known side value
+        for k in ['a', 'b', 'c', 'd']:
             if k in known:
                 val = netw.vars[k].value
                 break
         if val is not None:
-            for k in ['a','b','c','d']:
+            for k in ['a', 'b', 'c', 'd']:
                 if k not in known:
                     res[k] = val
-        return res
+        return res or None
+
     net.add_constraint(Constraint(
         name="square_sides_equal",
         nodes=['a', 'b', 'c', 'd'],
-        flex_func=square_sides_equal
+        flex_func=square_sides_equal,
+        description="Enforce all sides equal for square"
     ))
+
+    # area = a^2
     net.add_constraint(Constraint(
         name="square_area",
         nodes=['area', 'a'],
-        forward_func=lambda v: v['a']**2,
-        target='area'
+        forward_func=lambda v: (v['a']**2) if (v.get('a') is not None) else None,
+        dependencies=['a'],
+        target='area',
+        description="Square area = a^2"
     ))
+
+    # diagonal d1 = a * sqrt(2)
     net.add_constraint(Constraint(
         name="square_diag",
         nodes=['d1', 'a'],
-        forward_func=lambda v: v['a'] * math.sqrt(2),
-        target='d1'
+        forward_func=lambda v: (v['a'] * math.sqrt(2.0)) if (v.get('a') is not None) else None,
+        dependencies=['a'],
+        target='d1',
+        description="Square diagonal = a * sqrt(2)"
     ))
+
     return net
